@@ -1,0 +1,46 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function isActiveUser() {
+      return isSignedIn() && userDoc().data.isActive == true;
+    }
+
+    function userRole() {
+      return userDoc().data.role;
+    }
+
+    function isAdminOrManager() {
+      return isActiveUser() && (userRole() == 'admin' || userRole() == 'manager');
+    }
+
+    function isDepartmentWorker() {
+      return isActiveUser() && (
+        userRole() == 'supervisor' ||
+        userRole() == 'operator' ||
+        userRole() == 'qualityInspector' ||
+        userRole() == 'warehouseDelivery'
+      );
+    }
+
+    function canUploadOrderFiles() {
+      return isAdminOrManager() || isDepartmentWorker();
+    }
+
+    match /orders/{orderId}/{fileName} {
+      allow read: if isActiveUser();
+      allow write: if canUploadOrderFiles()
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|application/pdf');
+      allow delete: if isAdminOrManager();
+    }
+  }
+}

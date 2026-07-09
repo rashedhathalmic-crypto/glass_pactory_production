@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "340919504848",
+    "project_id": "glass-factory-suite",
+    "storage_bucket": "glass-factory-suite.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:340919504848:android:dccd343bc11b4f3b5ff3d5",
+        "android_client_info": {
+          "package_name": "com.example.glass_factory_suite"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC32r-CcQ513F7Egx8Noar6YI_fVwMVBlk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:340919504848:android:10c88b74f65121915ff3d5",
+        "android_client_info": {
+          "package_name": "com.example.glass_pactory_production"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC32r-CcQ513F7Egx8Noar6YI_fVwMVBlk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:340919504848:android:87b37dc075c626545ff3d5",
+        "android_client_info": {
+          "package_name": "com.glassfactory.suite"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC32r-CcQ513F7Egx8Noar6YI_fVwMVBlk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

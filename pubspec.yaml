@@ -1,0 +1,33 @@
+name: glass_pactory_production
+description: Glass Factory Production - Industrial ERP for glass manufacturing.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_core: ^4.11.0
+  cloud_firestore: ^6.6.0
+  firebase_auth: ^6.5.4
+  firebase_storage: ^13.4.3
+  flutter_riverpod: ^3.3.2
+  go_router: ^17.3.0
+  intl: ^0.20.2
+  material_symbols_icons: ^4.2874.0
+  fl_chart: ^0.70.2
+  pdf: ^3.11.3
+  printing: ^5.14.2
+  excel: ^4.0.6
+  mobile_scanner: ^7.0.1
+  universal_html: ^2.2.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

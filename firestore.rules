@@ -1,0 +1,124 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userRole() {
+      return userDoc().data.role;
+    }
+
+    function userDepartment() {
+      return userDoc().data.department;
+    }
+
+    function isActiveUser() {
+      return isSignedIn() && userDoc().data.isActive == true;
+    }
+
+    function isAdmin() {
+      return isActiveUser() && userRole() == 'admin';
+    }
+
+    function isManager() {
+      return isActiveUser() && userRole() == 'manager';
+    }
+
+    function isAdminOrManager() {
+      return isAdmin() || isManager();
+    }
+
+    function isSupervisor() {
+      return isActiveUser() && userRole() == 'supervisor';
+    }
+
+    function isOperator() {
+      return isActiveUser() && userRole() == 'operator';
+    }
+
+    function isQualityInspector() {
+      return isActiveUser() && userRole() == 'qualityInspector';
+    }
+
+    function isWarehouseDelivery() {
+      return isActiveUser() && userRole() == 'warehouseDelivery';
+    }
+
+    function isDepartmentScoped() {
+      return isSupervisor() || isOperator() || isQualityInspector() || isWarehouseDelivery();
+    }
+
+    function orderDepartment() {
+      return resource.data.currentDepartment;
+    }
+
+    function canAccessOrderDepartment() {
+      return !isDepartmentScoped() || userDepartment() == orderDepartment();
+    }
+
+    function canCreateOrder() {
+      return isAdminOrManager();
+    }
+
+    function canManageOrderFields() {
+      return isAdminOrManager();
+    }
+
+    function canUpdateOrder() {
+      return isActiveUser() && canAccessOrderDepartment();
+    }
+
+    match /users/{userId} {
+      allow read: if isActiveUser();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['lastLoginAt']));
+      allow delete: if isAdmin();
+    }
+
+    match /production_orders/{orderId} {
+      allow read: if isActiveUser();
+      allow create: if canCreateOrder();
+      allow update: if canUpdateOrder();
+      allow delete: if isAdmin();
+    }
+
+    match /order_history/{entryId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser() && canAccessOrderDepartment();
+      allow update, delete: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isActiveUser();
+      allow create: if isAdminOrManager() || isSupervisor();
+      allow update: if isActiveUser();
+      allow delete: if isAdminOrManager();
+    }
+
+    match /alerts/{alertId} {
+      allow read: if isActiveUser();
+      allow create: if isAdminOrManager();
+      allow update: if isActiveUser();
+      allow delete: if isAdminOrManager();
+    }
+
+    match /audit_log/{entryId} {
+      allow read: if isAdmin();
+      allow create: if isActiveUser();
+      allow update, delete: if isAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow read: if isActiveUser();
+      allow write: if isAdminOrManager();
+    }
+  }
+}

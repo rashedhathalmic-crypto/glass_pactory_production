@@ -1,0 +1,32 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "glass-factory-suite",
+          "appId": "1:340919504848:android:10c88b74f65121915ff3d5",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "glass-factory-suite",
+          "configurations": {
+            "android": "1:340919504848:android:10c88b74f65121915ff3d5",
+            "ios": "1:340919504848:ios:b8ce3e0677a946d45ff3d5",
+            "macos": "1:340919504848:ios:b8ce3e0677a946d45ff3d5",
+            "web": "1:340919504848:web:47bb2fdca74566795ff3d5",
+            "windows": "1:340919504848:web:1ca9500f5bd320cc5ff3d5"
+          }
+        }
+      }
+    }
+  }
+}
