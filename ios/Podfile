@@ -1,0 +1,46 @@
+platform :ios, '15.0'
+
+# CocoaPods analytics sends network stats synchronously, which may slow down pod install.
+enable_cocoapods_stats = ENV['COCOAPODS_DISABLE_STATS'].nil?
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def parse_KV_file(file, separator='=')
+  file_abs_path = File.expand_path(file)
+  return {} unless File.exist?(file_abs_path)
+  File.foreach(file_abs_path).map do |line|
+    next if line.strip.empty? || line.start_with?('#')
+    key, value = line.split(separator, 2)
+    [key.strip, value.strip] if key && value
+  end.compact.to_h
+end
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path('Flutter/Generated.xcconfig', __dir__)
+  raise "Generated.xcconfig must exist. If you're running pod install from outside of the ios directory, make sure you're in the ios directory first." unless File.exist?(generated_xcode_build_settings_path)
+  File.expand_path('..', generated_xcode_build_settings_path)
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+    end
+  end
+end
