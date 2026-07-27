@@ -436,6 +436,11 @@ List<_NavDestination> _buildDestinations(AppUser user) {
 
   destinations.addAll(const [
     _NavDestination(
+      path: RoutePaths.ncGenerator,
+      label: 'NC Generator',
+      icon: AppIcons.glassProcessing,
+    ),
+    _NavDestination(
       path: RoutePaths.search,
       label: 'Search',
       icon: AppIcons.search,
@@ -513,6 +518,7 @@ bool _isSelected(String location, String path) {
 }
 
 String _titleForLocation(String location) {
+  if (location.startsWith(RoutePaths.ncGenerator)) return 'CNC NC Generator';
   if (location.startsWith(RoutePaths.orders)) return 'Production Orders';
   if (location.startsWith(RoutePaths.users)) return 'Users';
   if (location.startsWith(RoutePaths.departments)) return 'Departments';
