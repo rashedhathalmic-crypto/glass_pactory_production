@@ -19,10 +19,10 @@ samples, guidance on mobile development, and a full API reference.
 ## Browser-based CNC NC generator
 
 The production web application includes a responsive NC generator at
-`/nc-generator`. It supports profiles `129-122-03-210`, `129-122-03-102`, and
-`129-122-03-211`, generates the complete program locally in the browser, and
-lets operators preview, copy, or download the result. Excel and a desktop
-installation are not required.
+`/nc-generator`. Upload a DXF containing LINE, ARC, CIRCLE, POLYLINE, or
+LWPOLYLINE geometry, preview it, configure tooling and feeds, and generate NC
+locally in the browser. The generator does not upload drawings or depend on
+predefined workbook profiles.
 
 Run the application for web development with:
 
