@@ -32,8 +32,11 @@ def test_reverse_engineers_all_worksheets_formulas_and_dependencies(tmp_path):
     assert catalog["NC"]["A2"]["dependencies"] == ("Input!B1",)
 
 
-def test_extracts_nc_from_workbook_cached_values(tmp_path):
+def test_inspection_exposes_cached_values_without_exporting_nc(tmp_path):
     workbook = tmp_path / "program.xlsx"
     make_workbook(workbook)
 
-    assert WorkbookEngine(workbook).extract_nc("NC") == "%\nO100\nG01 X100\nM30\n"
+    engine = WorkbookEngine(workbook)
+    nc_sheet = engine.reverse_engineer()[1]
+    assert [cell.value for cell in nc_sheet.cells] == ["%", "O100", "G01 X100", "M30"]
+    assert not hasattr(engine, "extract_nc")

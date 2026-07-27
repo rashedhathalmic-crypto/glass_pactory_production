@@ -15,3 +15,15 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+## Native CNC NC generator
+
+NC programs are generated directly in Python; Excel is not required at runtime.
+The three workbook profiles are supported:
+`129-122-03-210`, `129-122-03-102`, and `129-122-03-211`.
+
+```bash
+glass-cnc-nc-cli 129-122-03-211 --tool-diameter 94.4 --tool-width 24.3 -o program.nc
+```
+
+`WorkbookEngine` is retained only for inspecting worksheets and formula dependencies.

@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .native_nc import NCParameters, SUPPORTED_PROFILES, generate_nc
 from .workbook_engine import WorkbookEngine
 
 
@@ -31,6 +33,7 @@ class MainWindow(QMainWindow):
         self.workbook_path = QLineEdit()
         self.workbook_path.setReadOnly(True)
         self.sheets = QListWidget()
+        self.profile = QComboBox(); self.profile.addItems(SUPPORTED_PROFILES)
         self.output = QTextEdit()
         self.output.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.formulas = QTextEdit()
@@ -44,12 +47,13 @@ class MainWindow(QMainWindow):
         export_button = QPushButton("Export NC"); export_button.clicked.connect(self.export_nc)
         save_button = QPushButton("Save NC"); save_button.clicked.connect(self.save_nc)
         catalog_button = QPushButton("Save formula catalog"); catalog_button.clicked.connect(self.save_catalog)
-        top.addWidget(QLabel("Workbook:")); top.addWidget(self.workbook_path, stretch=1)
+        top.addWidget(QLabel("Profile:")); top.addWidget(self.profile)
+        top.addWidget(QLabel("Inspection workbook:")); top.addWidget(self.workbook_path, stretch=1)
         for button in (open_button, export_button, save_button, catalog_button):
             top.addWidget(button)
         body = QHBoxLayout()
         left = QVBoxLayout(); left.addWidget(QLabel("Worksheets")); left.addWidget(self.sheets, stretch=1)
-        middle = QVBoxLayout(); middle.addWidget(QLabel("Workbook-derived NC output")); middle.addWidget(self.output, stretch=1)
+        middle = QVBoxLayout(); middle.addWidget(QLabel("Native NC output")); middle.addWidget(self.output, stretch=1)
         right = QVBoxLayout(); right.addWidget(QLabel("Formula/dependency catalog")); right.addWidget(self.formulas, stretch=1)
         body.addLayout(left, stretch=1); body.addLayout(middle, stretch=3); body.addLayout(right, stretch=2)
         layout.addLayout(top); layout.addLayout(body, stretch=1)
@@ -73,18 +77,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Workbook load failed", str(exc))
 
     def export_nc(self) -> None:
-        if not self.engine:
-            QMessageBox.information(self, "Open workbook", "Open the uploaded Excel workbook first.")
-            return
         try:
-            item = self.sheets.currentItem()
-            sheet = item.text().split(" (", 1)[0] if item else None
-            self.output.setPlainText(self.engine.extract_nc(sheet))
-        except Exception:
-            try:
-                self.output.setPlainText(self.engine.extract_nc(None))
-            except Exception as exc:
-                QMessageBox.critical(self, "NC export failed", str(exc))
+            self.output.setPlainText(generate_nc(NCParameters(self.profile.currentText())))
+        except Exception as exc:
+            QMessageBox.critical(self, "NC generation failed", str(exc))
 
     def save_nc(self) -> None:
         if not self.output.toPlainText().strip():

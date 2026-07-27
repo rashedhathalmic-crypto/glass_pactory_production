@@ -11,7 +11,6 @@ from xml.etree import ElementTree as ET
 NS = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main", "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
 REL_NS = {"rel": "http://schemas.openxmlformats.org/package/2006/relationships"}
 CELL_REF_RE = re.compile(r"(?:(?:'[^']+'|[A-Za-z_][A-Za-z0-9_ .]*)!)?\$?[A-Z]{1,3}\$?\d+")
-NC_PREFIXES = ("%", "O", "G", "M", "T", "S", "F", "X", "Y", "Z", "(", ";")
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +38,7 @@ class WorksheetModel:
 
 
 class WorkbookEngine:
-    """Workbook-backed NC exporter: the XLSX/XLSM package is the source of truth."""
+    """Read-only workbook inspection and formula-analysis helper."""
 
     def __init__(self, workbook_path: str | Path) -> None:
         self.path = Path(workbook_path)
@@ -72,21 +71,6 @@ class WorkbookEngine:
 
     def write_formula_catalog(self, output_path: str | Path) -> None:
         Path(output_path).write_text(json.dumps(self.formula_catalog(), indent=2, sort_keys=True), encoding="utf-8")
-
-    def extract_nc(self, sheet_name: str | None = None) -> str:
-        sheets = self.reverse_engineer()
-        if sheet_name:
-            sheets = tuple(sheet for sheet in sheets if sheet.name == sheet_name)
-            if not sheets:
-                raise ValueError(f"Worksheet not found: {sheet_name}")
-        candidates: list[str] = []
-        for sheet in sheets:
-            lines = [cell.value.strip() for cell in sheet.cells if self._looks_like_nc_line(cell.value)]
-            if len(lines) > len(candidates):
-                candidates = lines
-        if not candidates:
-            raise ValueError("No NC output cells found in workbook cached values.")
-        return "\n".join(candidates).rstrip() + "\n"
 
     def _read_sheet(self, archive: zipfile.ZipFile, xml_path: str, sheet_name: str) -> Iterable[WorkbookCell]:
         root = ET.fromstring(archive.read(xml_path))
@@ -123,12 +107,3 @@ class WorkbookEngine:
             strings.append("".join(node.text or "" for node in item.findall(".//x:t", NS)))
         self._shared_strings = strings
         return strings
-
-    @staticmethod
-    def _looks_like_nc_line(value: str) -> bool:
-        text = value.strip().upper()
-        if not text:
-            return False
-        if text.startswith(NC_PREFIXES) and any(ch.isdigit() for ch in text):
-            return True
-        return text in {"%", "G21", "G90", "G17", "M30", "M05", "M03"}
