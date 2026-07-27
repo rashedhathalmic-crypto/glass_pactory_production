@@ -1,0 +1,81 @@
+name: Build Windows portable EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-exe:
+    name: Build portable Windows executable
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install application and PyInstaller
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . "pyinstaller>=6.0,<7.0"
+
+      # PyInstaller analyzes this absolute import as a package import, preserving
+      # the desktop application's relative imports without changing its source.
+      - name: Create packaged application entry point
+        shell: pwsh
+        run: |
+          @'
+          from cnc_nc_generator.app import main
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          '@ | Set-Content -Path pyinstaller_entry.py -Encoding utf8
+
+      - name: Build single-file portable executable
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --onefile `
+            --windowed `
+            --name GlassPactoryNCGenerator `
+            --collect-all cnc_nc_generator `
+            --collect-all openpyxl `
+            pyinstaller_entry.py
+
+      - name: Verify packaged executable
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "dist/GlassPactoryNCGenerator.exe"
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "PyInstaller did not create $exe"
+          }
+          $file = Get-Item -LiteralPath $exe
+          if ($file.Length -eq 0) {
+            throw "$exe is empty"
+          }
+          Write-Host "Portable executable: $($file.FullName) ($($file.Length) bytes)"
+
+      - name: Upload portable executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: glass-pactory-nc-generator-windows-portable
+          path: dist/GlassPactoryNCGenerator.exe
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
