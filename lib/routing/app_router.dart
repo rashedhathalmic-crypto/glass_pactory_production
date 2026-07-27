@@ -30,6 +30,12 @@ import 'router_refresh.dart';
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
+/// Routes that can be opened without an authenticated Firebase user.
+///
+/// Keep this check exact so authentication remains mandatory everywhere except
+/// the standalone NC Generator.
+bool isPublicRoute(String location) => location == RoutePaths.ncGenerator;
+
 String? _guardRoute(Ref ref, String location) {
   final user = ref.read(currentAppUserProvider).asData?.value;
   if (user == null) return null;
@@ -56,6 +62,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isLoggingIn = state.matchedLocation == RoutePaths.login;
       final location = state.matchedLocation;
 
+      if (isPublicRoute(location)) return null;
       if (!isLoggedIn && !isLoggingIn) return RoutePaths.login;
       if (isLoggedIn && isLoggingIn) return RoutePaths.dashboard;
 
