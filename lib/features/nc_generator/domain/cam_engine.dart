@@ -129,6 +129,7 @@ class CamEngine {
     return CamArc(a, b, DxfPoint(mid.x + nx, mid.y + ny), angle < 0);
   }
   static CamSegment _reverse(CamSegment s) => s is CamLine ? CamLine(s.end, s.start) : CamArc(s.end, s.start, (s as CamArc).center, !s.clockwise, fullCircle: s.fullCircle);
+  static CamSegment reverse(CamSegment segment) => _reverse(segment);
   static double _area(List<CamSegment> segments) {
     var area = 0.0;
     for (final s in segments) {
