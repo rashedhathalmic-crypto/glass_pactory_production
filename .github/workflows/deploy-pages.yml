@@ -40,7 +40,6 @@ jobs:
         run: >-
           flutter build web
           --release
-          --target lib/main_web.dart
           --base-href "/glass_pactory_production/"
 
       - name: Upload GitHub Pages artifact
