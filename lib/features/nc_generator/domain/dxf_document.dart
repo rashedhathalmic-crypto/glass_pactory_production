@@ -9,6 +9,7 @@ class DxfPoint {
   const DxfPoint(this.x, this.y);
   final double x;
   final double y;
+  double distanceTo(DxfPoint other) => math.sqrt(math.pow(x - other.x, 2) + math.pow(y - other.y, 2));
 }
 
 class DxfLine extends DxfEntity {
@@ -45,14 +46,19 @@ class DxfCircle extends DxfEntity {
 }
 
 class DxfPolyline extends DxfEntity {
-  const DxfPolyline(this.vertices, {this.closed = false});
+  const DxfPolyline(this.vertices, {this.closed = false, this.bulges = const []});
   final List<DxfPoint> vertices;
   final bool closed;
+  /// Arc bulge at each vertex (tan of one quarter of the included angle).
+  final List<double> bulges;
   @override Iterable<DxfPoint> get points => vertices;
 }
 
 class DxfDocument {
-  const DxfDocument(this.entities);
+  const DxfDocument(this.entities, {this.units = DxfUnits.unitless});
   final List<DxfEntity> entities;
+  final DxfUnits units;
   Iterable<DxfPoint> get points => entities.expand((entity) => entity.points);
 }
+
+enum DxfUnits { unitless, inches, feet, miles, millimeters, centimeters, meters, kilometers, unknown }

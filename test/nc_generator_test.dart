@@ -86,12 +86,59 @@ EOF
   });
 
   test('generates NC from imported geometry and settings', () {
-    final output = NcGenerator.generate(DxfParser.parse(dxf), const NcParameters(drawingName: 'part.dxf', toolNumber: 3, xOffset: 2, yOffset: -1, cuttingFeed: 900));
-    expect(output, contains('(DXF:PART.DXF/ THK 19MM)'));
-    expect(output, contains('T3M06'));
-    expect(output, contains('G01X102Y49F900'));
+    const closedDxf = '''0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+70
+1
+10
+0
+20
+0
+10
+100
+20
+0
+10
+100
+20
+50
+10
+0
+20
+50
+0
+CIRCLE
+10
+25
+20
+25
+40
+5
+0
+ENDSEC
+0
+EOF
+''';
+    final output = NcGenerator.generate(DxfParser.parse(closedDxf), const NcParameters(drawingName: 'part.dxf', toolNumber: 3, xOffset: 2, yOffset: -1, cuttingFeed: 900, maxPassDepth: 5));
+    expect(output, contains('(DXF:PART.DXF UNITS:UNITLESS THK:19MM)'));
+    expect(output, contains('T3 M06'));
+    expect(output, contains('PASS 4/4 Z-19'));
     expect(output, contains('G03'));
     expect(output, endsWith('M30\n%\n'));
+  });
+
+  test('blocks NC generation when a contour is open', () {
+    expect(
+      () => NcGenerator.generate(
+        const DxfDocument([DxfLine(DxfPoint(0, 0), DxfPoint(10, 0))]),
+        const NcParameters(drawingName: 'open.dxf'),
+      ),
+      throwsArgumentError,
+    );
   });
 
   test('rejects a DXF without supported entities', () {
