@@ -4,13 +4,14 @@ import 'cam_engine.dart';
 import 'dxf_document.dart';
 
 class NcParameters {
-  const NcParameters({required this.drawingName, this.toolNumber = 1, this.toolDiameter = 6, this.thickness = 19, this.maxPassDepth = 5, this.finishAllowance = 0, this.leadLength = 4, this.workOffset = 'G54', this.xOffset = 0, this.yOffset = 0, this.plungeFeed = 300, this.cuttingFeed = 1200, this.spindleSpeed = 5500, this.safeHeight = 10, this.programNumber = 'O0001'});
+  const NcParameters({required this.drawingName, this.toolNumber = 1, this.toolDiameter = 6, this.toolWidth = 24.3, this.thickness = 19, this.maxPassDepth = 5, this.finishAllowance = 0, this.leadLength = 4, this.workOffset = 'G54', this.xOffset = 0, this.yOffset = 0, this.plungeFeed = 300, this.cuttingFeed = 1200, this.roughingFeed = 1000, this.finishingFeed = 2000, this.spindleSpeed = 5500, this.safeHeight = 10, this.programNumber = 'O0001'});
   final String drawingName;
   final int toolNumber, plungeFeed, cuttingFeed, spindleSpeed;
-  final double toolDiameter, thickness, maxPassDepth, finishAllowance, leadLength, xOffset, yOffset, safeHeight;
+  final double toolDiameter, toolWidth, thickness, maxPassDepth, finishAllowance, leadLength, xOffset, yOffset, safeHeight;
+  final int roughingFeed, finishingFeed;
   final String workOffset, programNumber;
   void validate() {
-    if (toolNumber <= 0 || toolDiameter <= 0 || thickness <= 0 || maxPassDepth <= 0 || safeHeight <= 0 || leadLength < 0) throw ArgumentError('Tool, thickness, step-down and safe height must be positive.');
+    if (toolNumber <= 0 || toolDiameter <= 0 || toolWidth <= 0 || thickness <= 0 || maxPassDepth <= 0 || safeHeight <= 0 || leadLength < 0) throw ArgumentError('Tool, thickness, step-down and safe height must be positive.');
     if (plungeFeed <= 0 || cuttingFeed <= 0 || spindleSpeed <= 0) throw ArgumentError('Feed rates and spindle speed must be positive.');
     if (!RegExp(r'^G5[4-9]$').hasMatch(workOffset)) throw ArgumentError('Work offset must be G54–G59.');
     if (!RegExp(r'^O\d{1,8}$').hasMatch(programNumber)) throw ArgumentError('Program number must use the format O0001.');
@@ -24,6 +25,10 @@ class NcGenerator {
     final plan = CamEngine.analyze(document);
     if (plan.contours.isEmpty) throw ArgumentError('Upload a DXF drawing first.');
     if (plan.warnings.isNotEmpty) throw ArgumentError('${plan.warnings.join(' ')} Repair the DXF before generating production NC.');
+    // SKG perimeter wheels cut the full glass edge with a sequence of radial
+    // takes, rather than with router-style depth passes.  Keeping this decision
+    // here also leaves the established small-diameter routing mode unchanged.
+    if (p.toolDiameter >= 50 && plan.contours.length == 1) return _grind(plan.contours.single, p);
     final passes = (p.thickness / p.maxPassDepth).ceil();
     final out = <String>[
       '%', p.programNumber,
@@ -53,6 +58,61 @@ class NcGenerator {
     out.addAll(['G00 Z${_n(p.safeHeight)}', 'M05', 'G49', 'G00 X0 Y0', 'M30', '%']);
     return '${out.join('\n')}\n';
   }
+
+  static String _grind(CamContour source, NcParameters p) {
+    final radius = p.toolDiameter / 2;
+    final takes = [radius + 1.5, radius + .4, radius + .2, radius];
+    final z = -(p.thickness + (p.toolWidth - p.thickness) / 2);
+    final contours = takes.map((take) => _canonical(_compensate(source, take))).toList();
+    final out = <String>[
+      '%', p.programNumber,
+      '(PART NAME/NUMBER:${_partName(p.drawingName)}/ THK ${_nc(p.thickness)}MM/PERIMETER)',
+      '(TOOL:ØX${_nc(p.toolDiameter)}MM/THK${_nc(p.toolWidth)}MM)',
+      'S${p.toolDiameter < 110 ? 5500 : 3800}M03', 'G90G40G49G80G98',
+      'G21G00${p.workOffset}G17', 'T${p.toolNumber.toString().padLeft(2, '0')}M06',
+      'G90G00G43Z50,0H${p.toolNumber.toString().padLeft(2, '0')}',
+      'G90G00X${_nc(-radius)}Y${_nc(-radius - 10)}', 'Z10,0',
+      'G01Z${_nc(z)}F3000', '',
+      'G01X${_nc(-radius)}Y${_nc(contours.first.segments.first.start.y + p.yOffset)}F${p.roughingFeed}', '',
+    ];
+    for (var pass = 0; pass < 5; pass++) {
+      final takeIndex = math.min(pass, 3);
+      final contour = contours[takeIndex];
+      final feed = takeIndex < 2 ? p.roughingFeed : p.finishingFeed;
+      final first = contour.segments.first.start;
+      out.add('G90G01X${_nc(first.x + p.xOffset)}Y${_nc(first.y + p.yOffset)}Z${_nc(z)}${pass == 0 ? '' : 'F$feed'}');
+      for (var i = 0; i < contour.segments.length; i++) {
+        final segment = contour.segments[i];
+        final dz = i == 0 ? 'Z0,3' : i == contour.segments.length ~/ 2 ? 'Z-0,3' : '';
+        if (segment is CamLine) {
+          out.add('${i == 0 ? 'G91G01' : ''}X${_nc(segment.end.x - segment.start.x)}Y${_nc(segment.end.y - segment.start.y)}$dz');
+        } else {
+          final arc = segment as CamArc;
+          out.add('${i == 0 ? 'G91' : ''}${arc.clockwise ? 'G02' : 'G03'}X${_nc(arc.end.x - arc.start.x)}Y${_nc(arc.end.y - arc.start.y)}I${_nc(arc.center.x - arc.start.x)}J${_nc(arc.center.y - arc.start.y)}$dz');
+        }
+      }
+      out.add('');
+    }
+    out.addAll(['X5,0Y-5,0', '', 'G90G00X-60,0Y-60,0', 'Z50,0', 'X-400,0Y300,0', 'M05', 'M09', 'G49', 'M30', '%']);
+    return '${out.join('\n')}\n';
+  }
+
+  /// Reference programs enter on the lower edge and run counter-clockwise.
+  static CamContour _canonical(CamContour contour) {
+    var segments = contour.segments.toList();
+    if (contour.signedArea < 0) segments = segments.reversed.map((s) => CamEngine.reverse(s)).toList();
+    var best = 0;
+    for (var i = 1; i < segments.length; i++) {
+      final a = segments[i], b = segments[best];
+      final aRight = a.end.x - a.start.x > 0, bRight = b.end.x - b.start.x > 0;
+      if ((aRight && !bRight) || (aRight == bRight && (a.start.y < b.start.y - 1e-7 || (a.start.y - b.start.y).abs() < 1e-7 && a.start.x < b.start.x))) best = i;
+    }
+    segments = [...segments.skip(best), ...segments.take(best)];
+    return CamContour(segments: segments, closed: true, signedArea: contour.signedArea.abs(), kind: contour.kind, depth: contour.depth);
+  }
+
+  static String _partName(String name) => name.replaceAll(RegExp(r'\.[dD][xX][fF]$'), '').toUpperCase();
+  static String _nc(num value) => '${(value.abs() < 5e-9 ? 0 : value).toStringAsFixed(8).replaceFirst(RegExp(r'\.?0+$'), '')}${value == value.roundToDouble() ? ',0' : ''}'.replaceFirst('.', ',');
 
   static CamContour _compensate(CamContour c, double radius) {
     if (radius == 0 || c.segments.any((s) => s is! CamLine)) return _radialCompensate(c, radius);

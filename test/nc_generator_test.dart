@@ -141,6 +141,27 @@ EOF
     );
   });
 
+  test('large perimeter wheel follows the reference five-pass cycle', () {
+    const document = DxfDocument([
+      DxfPolyline([
+        DxfPoint(0, 0), DxfPoint(100, 0),
+        DxfPoint(100, 50), DxfPoint(0, 50),
+      ], closed: true),
+    ]);
+    final output = NcGenerator.generate(document, const NcParameters(
+      drawingName: '129-122-03-211.dxf', toolDiameter: 94.4,
+      workOffset: 'G58',
+    ));
+    expect(output, contains('(PART NAME/NUMBER:129-122-03-211/ THK 19,0MM/PERIMETER)'));
+    expect(output, contains('G01Z-21,65F3000'));
+    expect(RegExp(r'^G90G01', multiLine: true).allMatches(output), hasLength(5));
+    expect(RegExp(r'^G91G01.*Z0,3$', multiLine: true).allMatches(output), hasLength(5));
+    expect(RegExp(r'Z-0,3$', multiLine: true).allMatches(output), hasLength(5));
+    final passes = output.split('\n\n').where((block) => block.startsWith('G90G01')).toList();
+    expect(passes[3], passes[4]);
+    expect(output, endsWith('M30\n%\n'));
+  });
+
   test('rejects a DXF without supported entities', () {
     expect(() => DxfParser.parse('0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n'), throwsFormatException);
   });
