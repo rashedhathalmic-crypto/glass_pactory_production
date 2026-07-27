@@ -15,9 +15,17 @@ Object registerFileDrop(void Function(PickedFile file) callback) {
   subscriptions.add(html.document.onDragOver.listen((event) => event.preventDefault()));
   subscriptions.add(html.document.onDrop.listen((event) async {
     event.preventDefault();
-    final files = event.dataTransfer.files;
-    if (files.isEmpty || !files.first.name.toLowerCase().endsWith('.dxf')) return;
+    final files = event.dataTransfer?.files;
+
+    if (files == null || files.isEmpty) {
+      return;
+    }
+
     final file = files.first;
+
+    if (!file.name.toLowerCase().endsWith('.dxf')) {
+      return;
+    }
     final reader = html.FileReader()..readAsArrayBuffer(file);
     await reader.onLoadEnd.first;
     callback(PickedFile(fileName: file.name, bytes: reader.result as Uint8List, contentType: file.type));
