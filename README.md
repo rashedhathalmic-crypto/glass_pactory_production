@@ -24,6 +24,13 @@ LWPOLYLINE geometry, preview it, configure tooling and feeds, and generate NC
 locally in the browser. The generator does not upload drawings or depend on
 predefined workbook profiles.
 
+The CAM core is split into geometry analysis, native line/arc offsetting,
+inside-first toolpath planning, an SKG1625 machine profile, and NC serialization.
+Each closed contour receives configurable rough offsets, an optional
+semi-finish allowance pass, and a dedicated finish pass. Inter-contour moves
+use absolute (`G90`) coordinates while contour cutting uses incremental
+(`G91`) coordinates and configurable lead-in, lead-out, and Z oscillation.
+
 Run the application for web development with:
 
 ```bash

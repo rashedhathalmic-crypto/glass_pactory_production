@@ -123,10 +123,16 @@ ENDSEC
 0
 EOF
 ''';
-    final output = NcGenerator.generate(DxfParser.parse(closedDxf), const NcParameters(drawingName: 'part.dxf', toolNumber: 3, xOffset: 2, yOffset: -1, cuttingFeed: 900, maxPassDepth: 5));
+    final output = NcGenerator.generate(DxfParser.parse(closedDxf), const NcParameters(drawingName: 'part.dxf', toolNumber: 3, xOffset: 2, yOffset: -1, feedRough: 900, roughPasses: 2, offsetDistance: 1.2, finishAllowance: .2));
     expect(output, contains('(DXF:PART.DXF UNITS:UNITLESS THK:19MM)'));
-    expect(output, contains('T3 M06'));
-    expect(output, contains('PASS 4/4 Z-19'));
+    expect(output, contains('T03M06'));
+    expect(output, contains('ROUGH'));
+    expect(output, contains('SEMIFINISH'));
+    expect(output, contains('FINISH'));
+    expect(RegExp(r'G90G00X').allMatches(output).length, greaterThan(2));
+    expect(RegExp(r'G91G01X').allMatches(output).length, greaterThan(2));
+    expect(output, contains('Z0.3F900 (LEAD IN)'));
+    expect(output, contains('Z-0.6'));
     expect(output, contains('G03'));
     expect(output, endsWith('M30\n%\n'));
   });
