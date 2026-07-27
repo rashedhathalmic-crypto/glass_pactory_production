@@ -1,74 +1,50 @@
 import 'dart:convert';
 import 'dart:typed_data';
-
 import 'dxf_document.dart';
 
 class DxfParser {
   const DxfParser._();
-
   static DxfDocument parseBytes(Uint8List bytes) => parse(utf8.decode(bytes, allowMalformed: true));
-
   static DxfDocument parse(String source) {
     final lines = const LineSplitter().convert(source);
-    if (lines.length < 2) throw const FormatException('The DXF file is empty or invalid.');
     final pairs = <_Pair>[];
-    for (var i = 0; i + 1 < lines.length; i += 2) {
-      final code = int.tryParse(lines[i].trim());
-      if (code != null) pairs.add(_Pair(code, lines[i + 1].trim()));
-    }
-    final entities = <DxfEntity>[];
+    for (var i = 0; i + 1 < lines.length; i += 2) { final code = int.tryParse(lines[i].trim()); if (code != null) pairs.add(_Pair(code, lines[i + 1].trim())); }
+    final entities = <DxfEntity>[], unsupported = <String>[];
     var inEntities = false;
     for (var i = 0; i < pairs.length;) {
-      final pair = pairs[i];
-      if (pair.code == 0 && pair.value == 'SECTION' && i + 1 < pairs.length && pairs[i + 1].value == 'ENTITIES') {
-        inEntities = true; i += 2; continue;
-      }
-      if (inEntities && pair.code == 0 && pair.value == 'ENDSEC') { inEntities = false; i++; continue; }
-      if (!inEntities || pair.code != 0) { i++; continue; }
-      final type = pair.value.toUpperCase();
+      if (pairs[i].code == 0 && pairs[i].value.toUpperCase() == 'SECTION' && i + 1 < pairs.length && pairs[i + 1].value.toUpperCase() == 'ENTITIES') { inEntities = true; i += 2; continue; }
+      if (inEntities && pairs[i].code == 0 && pairs[i].value.toUpperCase() == 'ENDSEC') { inEntities = false; i++; continue; }
+      if (!inEntities || pairs[i].code != 0) { i++; continue; }
+      final type = pairs[i].value.toUpperCase();
       if (type == 'POLYLINE') {
-        final headerEnd = _nextEntity(pairs, i + 1);
-        final closed = (_int(pairs.sublist(i + 1, headerEnd), 70) & 1) != 0;
-        final vertices = <DxfPoint>[];
+        final headerEnd = _next(pairs, i + 1), vertices = <DxfVertex>[];
+        final closed = _int(pairs.sublist(i + 1, headerEnd), 70) & 1 != 0;
         i = headerEnd;
-        while (i < pairs.length && pairs[i].value == 'VERTEX') {
-          final end = _nextEntity(pairs, i + 1);
-          final data = pairs.sublist(i + 1, end);
-          vertices.add(DxfPoint(_num(data, 10), _num(data, 20)));
-          i = end;
-        }
-        if (i < pairs.length && pairs[i].value == 'SEQEND') i = _nextEntity(pairs, i + 1);
+        while (i < pairs.length && pairs[i].value.toUpperCase() == 'VERTEX') { final end = _next(pairs, i + 1), data = pairs.sublist(i + 1, end); vertices.add(DxfVertex(DxfPoint(_num(data, 10), _num(data, 20)), bulge: _num(data, 42))); i = end; }
+        if (i < pairs.length && pairs[i].value.toUpperCase() == 'SEQEND') i = _next(pairs, i + 1);
         if (vertices.length >= 2) entities.add(DxfPolyline(vertices, closed: closed));
         continue;
       }
-      final end = _nextEntity(pairs, i + 1);
-      final data = pairs.sublist(i + 1, end);
+      final end = _next(pairs, i + 1), data = pairs.sublist(i + 1, end);
       switch (type) {
-        case 'LINE':
-          entities.add(DxfLine(DxfPoint(_num(data, 10), _num(data, 20)), DxfPoint(_num(data, 11), _num(data, 21))));
-        case 'ARC':
-          entities.add(DxfArc(DxfPoint(_num(data, 10), _num(data, 20)), _positive(data, 40), _num(data, 50), _num(data, 51)));
-        case 'CIRCLE':
-          entities.add(DxfCircle(DxfPoint(_num(data, 10), _num(data, 20)), _positive(data, 40)));
+        case 'LINE': entities.add(DxfLine(DxfPoint(_num(data, 10), _num(data, 20)), DxfPoint(_num(data, 11), _num(data, 21))));
+        case 'ARC': entities.add(DxfArc(DxfPoint(_num(data, 10), _num(data, 20)), _radius(data), _num(data, 50), _num(data, 51)));
+        case 'CIRCLE': entities.add(DxfCircle(DxfPoint(_num(data, 10), _num(data, 20)), _radius(data)));
         case 'LWPOLYLINE':
-          final vertices = <DxfPoint>[];
-          double? x;
-          for (final item in data) {
-            if (item.code == 10) { x = double.tryParse(item.value); }
-            if (item.code == 20 && x != null) { vertices.add(DxfPoint(x, double.parse(item.value))); x = null; }
-          }
-          if (vertices.length >= 2) entities.add(DxfPolyline(vertices, closed: (_int(data, 70) & 1) != 0));
+          final vertices = <DxfVertex>[];
+          for (var n = 0; n < data.length; n++) if (data[n].code == 10) { final x = double.parse(data[n].value); double y = 0, bulge = 0; for (var k = n + 1; k < data.length && data[k].code != 10; k++) { if (data[k].code == 20) y = double.parse(data[k].value); if (data[k].code == 42) bulge = double.parse(data[k].value); } vertices.add(DxfVertex(DxfPoint(x, y), bulge: bulge)); }
+          if (vertices.length >= 2) entities.add(DxfPolyline(vertices, closed: _int(data, 70) & 1 != 0));
+        case 'VERTEX': break;
+        default: if (!const {'SEQEND', 'ENDSEC', 'EOF'}.contains(type)) unsupported.add(type);
       }
       i = end;
     }
     if (entities.isEmpty) throw const FormatException('No supported LINE, ARC, CIRCLE, POLYLINE or LWPOLYLINE entities were found.');
-    return DxfDocument(entities);
+    return DxfDocument(entities, unsupportedEntities: unsupported.toSet().toList());
   }
-
-  static int _nextEntity(List<_Pair> pairs, int start) { var i = start; while (i < pairs.length && pairs[i].code != 0) { i++; } return i; }
-  static double _num(List<_Pair> data, int code) => double.parse(data.firstWhere((p) => p.code == code, orElse: () => const _Pair(-1, '0')).value);
-  static double _positive(List<_Pair> data, int code) { final value = _num(data, code); if (!value.isFinite || value <= 0) throw FormatException('Invalid DXF radius: $value'); return value; }
-  static int _int(List<_Pair> data, int code) => int.tryParse(data.firstWhere((p) => p.code == code, orElse: () => const _Pair(-1, '0')).value) ?? 0;
+  static int _next(List<_Pair> p, int i) { while (i < p.length && p[i].code != 0) i++; return i; }
+  static double _num(List<_Pair> d, int code) => double.tryParse(d.where((p) => p.code == code).firstOrNull?.value ?? '0') ?? 0;
+  static int _int(List<_Pair> d, int code) => int.tryParse(d.where((p) => p.code == code).firstOrNull?.value ?? '0') ?? 0;
+  static double _radius(List<_Pair> d) { final r = _num(d, 40); if (r <= 0 || !r.isFinite) throw FormatException('Invalid DXF radius: $r'); return r; }
 }
-
 class _Pair { const _Pair(this.code, this.value); final int code; final String value; }
