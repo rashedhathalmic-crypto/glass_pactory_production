@@ -15,6 +15,7 @@ abstract final class RoutePaths {
   static const String management = '/management';
   static const String productionManagement = '/production-management';
   static const String auditLog = '/audit-log';
+  static const String ncGenerator = '/nc-generator';
   static const String accessDenied = '/access-denied';
 
   static String orderDetailPath(String orderId) => '/orders/$orderId';

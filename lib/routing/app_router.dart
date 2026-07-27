@@ -12,6 +12,7 @@ import '../features/departments/presentation/departments_screen.dart';
 import '../features/drawings/presentation/drawing_archive_screen.dart';
 import '../features/management/presentation/management_dashboard_screen.dart';
 import '../features/management/presentation/production_management_screen.dart';
+import '../features/nc_generator/presentation/nc_generator_screen.dart';
 import '../features/notifications/presentation/notification_center_screen.dart';
 import '../features/production_orders/presentation/order_detail_screen.dart';
 import '../features/production_orders/presentation/order_form_screen.dart';
@@ -168,6 +169,11 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: RoutePaths.auditLog,
             pageBuilder: (context, state) =>
                 const NoTransitionPage(child: AuditLogScreen()),
+          ),
+          GoRoute(
+            path: RoutePaths.ncGenerator,
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: NcGeneratorScreen()),
           ),
         ],
       ),

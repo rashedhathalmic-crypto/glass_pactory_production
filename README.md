@@ -16,11 +16,22 @@ For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
 
-## Native CNC NC generator
+## Browser-based CNC NC generator
 
-NC programs are generated directly in Python; Excel is not required at runtime.
-The three workbook profiles are supported:
-`129-122-03-210`, `129-122-03-102`, and `129-122-03-211`.
+The production web application includes a responsive NC generator at
+`/nc-generator`. It supports profiles `129-122-03-210`, `129-122-03-102`, and
+`129-122-03-211`, generates the complete program locally in the browser, and
+lets operators preview, copy, or download the result. Excel and a desktop
+installation are not required.
+
+Run the application for web development with:
+
+```bash
+flutter run -d chrome
+```
+
+The Python generator remains as a tested reference engine and command-line
+option for automation:
 
 ```bash
 glass-cnc-nc-cli 129-122-03-211 --tool-diameter 94.4 --tool-width 24.3 -o program.nc
