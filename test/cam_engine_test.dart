@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glass_pactory_production/features/nc_generator/domain/cam_engine.dart';
 import 'package:glass_pactory_production/features/nc_generator/domain/dxf_document.dart';
+import 'package:glass_pactory_production/features/nc_generator/domain/offset_engine.dart';
 
 void main() {
   test('joins unordered edges and classifies nested holes first', () {
@@ -30,5 +31,18 @@ void main() {
       DxfLine(DxfPoint(20, 0), DxfPoint(30, 0)),
     ]));
     expect(plan.warnings, hasLength(2));
+  });
+
+  test('offset engine preserves circles and creates parallel polygon offsets', () {
+    final plan = CamEngine.analyze(const DxfDocument([
+      DxfPolyline([DxfPoint(0, 0), DxfPoint(100, 0), DxfPoint(100, 50), DxfPoint(0, 50)], closed: true),
+      DxfCircle(DxfPoint(50, 25), 5),
+    ]));
+    final circle = OffsetEngine.offset(plan.contours.first, 2);
+    final rectangle = OffsetEngine.offset(plan.contours.last, 2);
+    expect(circle.segments.single, isA<CamArc>());
+    expect((circle.segments.single as CamArc).fullCircle, isTrue);
+    expect(rectangle.segments, hasLength(4));
+    expect(rectangle.length, greaterThan(plan.contours.last.length));
   });
 }
