@@ -29,21 +29,27 @@ class ToolpathPlanner {
       final deepest = pending.map((c) => c.depth).reduce((a,b)=>a>b?a:b);
       final candidates = pending.where((c) => c.depth == deepest).toList()..sort((a,b)=>a.start.distanceTo(current).compareTo(b.start.distanceTo(current)));
       final contour = candidates.first; pending.remove(contour); current = contour.start;
-      final total = p.roughPasses + (p.finishAllowance > 0 ? 1 : 0) + 1;
-      for (var rough = 0; rough < p.roughPasses; rough++) {
-        final remaining = p.roughPasses - rough;
-        final offset = p.toolRadius + p.finishAllowance + remaining * p.offsetDistance;
-        passes.add(MachiningPass(contour: OffsetEngine.offset(contour, offset), strategy: PassStrategy.rough, feed: p.feedRough, ordinal: passes.length + 1, total: total));
+      final total = p.totalPasses;
+      for (var passIndex = 0; passIndex < total; passIndex++) {
+        final remaining = total - 1 - passIndex;
+        final offset = p.toolRadius + remaining * p.offsetDistance;
+        final isFinish = passIndex == total - 1;
+        final isRough = passIndex < 2;
+        passes.add(MachiningPass(
+          contour: OffsetEngine.offset(contour, offset),
+          strategy: isFinish ? PassStrategy.finish : (isRough ? PassStrategy.rough : PassStrategy.semiFinish),
+          feed: isRough ? p.feedRough : p.feedFinish,
+          ordinal: passes.length + 1,
+          total: total,
+        ));
       }
-      if (p.finishAllowance > 0) passes.add(MachiningPass(contour: OffsetEngine.offset(contour, p.toolRadius + p.finishAllowance), strategy: PassStrategy.semiFinish, feed: p.feedRough, ordinal: passes.length + 1, total: total));
-      passes.add(MachiningPass(contour: OffsetEngine.offset(contour, p.toolRadius), strategy: PassStrategy.finish, feed: p.feedFinish, ordinal: passes.length + 1, total: total));
     }
     return ToolpathPlan(passes, source);
   }
 }
 
 class PlannerParameters {
-  const PlannerParameters({required this.roughPasses,required this.offsetDistance,required this.finishAllowance,required this.toolRadius,required this.feedRough,required this.feedFinish});
-  final int roughPasses, feedRough, feedFinish;
-  final double offsetDistance, finishAllowance, toolRadius;
+  const PlannerParameters({required this.totalPasses,required this.offsetDistance,required this.toolRadius,required this.feedRough,required this.feedFinish});
+  final int totalPasses, feedRough, feedFinish;
+  final double offsetDistance, toolRadius;
 }
