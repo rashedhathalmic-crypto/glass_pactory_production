@@ -16,8 +16,24 @@ class NcParameters {
 
 class NcGenerator {
   const NcGenerator._();
+  static DxfDocument _moveToOrigin(DxfDocument document) {
+    final points = document.points.toList();
+    if (points.isEmpty) return document;
+    final minX = points.map((p) => p.x).reduce((a, b) => a < b ? a : b);
+    final minY = points.map((p) => p.y).reduce((a, b) => a < b ? a : b);
+    DxfPoint point(DxfPoint p) => DxfPoint(p.x - minX, p.y - minY);
+    final entities = document.entities.map<DxfEntity>((entity) {
+      if (entity is DxfLine) return DxfLine(point(entity.start), point(entity.end));
+      if (entity is DxfArc) return DxfArc(point(entity.center), entity.radius, entity.startAngle, entity.endAngle, clockwise: entity.clockwise);
+      if (entity is DxfCircle) return DxfCircle(point(entity.center), entity.radius);
+      final polyline = entity as DxfPolyline;
+      return DxfPolyline(polyline.vertices.map(point).toList(), closed: polyline.closed, bulges: polyline.bulges);
+    }).toList();
+    return DxfDocument(entities, units: document.units);
+  }
+
   static String generate(DxfDocument document,NcParameters p,{MachineProfile profile=MachineProfile.skg1625}){
-    p.validate(); final geometry=CamEngine.analyze(document);
+    p.validate(); final geometry=CamEngine.analyze(_moveToOrigin(document));
     if(geometry.contours.isEmpty)throw ArgumentError('Upload a DXF drawing first.');
     if(geometry.warnings.isNotEmpty)throw ArgumentError('${geometry.warnings.join(' ')} Repair the DXF before generating production NC.');
     final plan=ToolpathPlanner.plan(geometry,PlannerParameters(totalPasses:p.totalPasses,offsetDistance:p.offsetDistance,toolRadius:p.toolDiameter/2,feedRough:p.feedRough,feedFinish:p.feedFinish));
