@@ -2,12 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'core/theme/app_theme.dart';
 import 'features/nc_generator/presentation/nc_generator_screen.dart';
+import 'features/nc_generator/presentation/pdf_to_dxf_screen.dart';
 
-/// Application entry point.
-///
-/// The public web application starts directly in the NC Generator. Keeping the
-/// startup page here (rather than in a separate build target) also makes the
-/// default `flutter build web` entry point safe for GitHub Pages.
 void main() {
   runApp(const NcGeneratorApp());
 }
@@ -18,10 +14,26 @@ class NcGeneratorApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'DXF to NC Generator',
+      title: 'Glass CNC Tools',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: const Scaffold(body: NcGeneratorScreen()),
+      home: const DefaultTabController(
+        length: 2,
+        child: Scaffold(
+          appBar: TabBar(
+            tabs: [
+              Tab(icon: Icon(Icons.precision_manufacturing), text: 'DXF → NC Grinding'),
+              Tab(icon: Icon(Icons.picture_as_pdf), text: 'PDF → DXF 2D'),
+            ],
+          ),
+          body: TabBarView(
+            children: [
+              NcGeneratorScreen(),
+              PdfToDxfScreen(),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
