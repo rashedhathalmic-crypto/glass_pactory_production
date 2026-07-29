@@ -19,7 +19,7 @@ import '../domain/nc_generator.dart';
 class NcGeneratorScreen extends StatefulWidget { const NcGeneratorScreen({super.key}); @override State<NcGeneratorScreen> createState() => _State(); }
 
 class _State extends State<NcGeneratorScreen> {
-  final _tool = TextEditingController(text: '1'), _diameter = TextEditingController(text: '97'), _thickness = TextEditingController(text: '10'), _passes = TextEditingController(text: '4'), _cutPerPass = TextEditingController(text: '1.1'), _x = TextEditingController(text: '0'), _y = TextEditingController(text: '0'), _plunge = TextEditingController(text: '300'), _feed = TextEditingController(text: '1200'), _program = TextEditingController(text: 'O0001');
+  final _tool = TextEditingController(text: '1'), _diameter = TextEditingController(text: '97'), _thickness = TextEditingController(text: '10'), _passes = TextEditingController(text: '4'), _cutPerPass = TextEditingController(text: '0.5'), _x = TextEditingController(text: '0'), _y = TextEditingController(text: '0'), _plunge = TextEditingController(text: '300'), _feed = TextEditingController(text: '1200'), _program = TextEditingController(text: 'O0001');
   late final List<TextEditingController> _controllers = [_tool, _diameter, _thickness, _passes, _cutPerPass, _x, _y, _plunge, _feed, _program];
   late final Object _dropRegistration;
   DxfDocument? _document; String? _fileName, _error; String _output = '';
