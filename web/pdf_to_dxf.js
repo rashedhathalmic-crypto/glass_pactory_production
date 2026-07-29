@@ -25,6 +25,19 @@ function cubic(points, p0, p1, p2, p3) {
   }
 }
 
+function circleLike(path) {
+  const pts = path.points;
+  if (pts.length < 20) return false;
+  const cx = pts.reduce((sum,p)=>sum+p[0],0)/pts.length;
+  const cy = pts.reduce((sum,p)=>sum+p[1],0)/pts.length;
+  const radii = pts.map(p=>Math.hypot(p[0]-cx,p[1]-cy));
+  const mean = radii.reduce((a,b)=>a+b,0)/radii.length;
+  const variance = radii.reduce((sum,r)=>sum+(r-mean)*(r-mean),0)/radii.length;
+  const width = path.maxX-path.minX, height = path.maxY-path.minY;
+  return mean > 0 && Math.sqrt(variance)/mean < 0.08 &&
+    Math.max(width,height)/Math.max(1e-9,Math.min(width,height)) < 1.25;
+}
+
 function dxf(points) {
   const rows = ['0','SECTION','2','HEADER','9','$INSUNITS','70','4','0','ENDSEC','0','SECTION','2','ENTITIES','0','LWPOLYLINE','100','AcDbEntity','8','OUTLINE','100','AcDbPolyline','90',String(points.length),'70','1'];
   for (const p of points) rows.push('10', p[0].toFixed(4), '20', p[1].toFixed(4));
@@ -73,9 +86,10 @@ window.pdfToDxf2d = async function(bytes) {
     const xs=p.points.map(q=>q[0]), ys=p.points.map(q=>q[1]);
     return {...p,minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)};
   }).filter(p => !((p.maxX-p.minX)>viewport.width*.95 && (p.maxY-p.minY)>viewport.height*.95));
-  if (!measured.length) throw new Error('No closed vector outline found in the PDF.');
-  measured.sort((a,b)=>(b.maxX-b.minX)*(b.maxY-b.minY)-(a.maxX-a.minX)*(a.maxY-a.minY));
-  const shape=measured[0];
+  const nonCircular = measured.filter(p => !circleLike(p));
+  if (!nonCircular.length) throw new Error('No non-circular closed profile found in the PDF.');
+  nonCircular.sort((a,b)=>(b.maxX-b.minX)*(b.maxY-b.minY)-(a.maxX-a.minX)*(a.maxY-a.minY));
+  const shape=nonCircular[0];
   const mmPerPoint = 25.4 / 72 * (page.userUnit || 1);
   const points=shape.points.map(p=>[
     (p[0]-shape.minX)*mmPerPoint,
