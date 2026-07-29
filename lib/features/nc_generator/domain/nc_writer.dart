@@ -11,7 +11,7 @@ class NcWriter {
   final NcOutputParameters p;
 
   String write(ToolpathPlan plan, String units) {
-    final out = <String>['%', p.programNumber, '(${profile.name} CAM - OFFSET ROUGH / SEMI-FINISH / FINISH)', '(DXF:${_safe(p.drawingName)} UNITS:$units THK:${_n(p.thickness)}MM)', '(CONTOURS:${plan.source.contours.length} TOOL:D${_n(p.toolDiameter)} ROUGH:${p.roughPasses} STEP:${_n(p.offsetDistance)} FINISH-ALLOW:${_n(p.finishAllowance)})', 'G90G40G49G80G98', 'G21G00${p.workOffset}G17', 'T${p.toolNumber.toString().padLeft(2,'0')}M06', 'S${p.spindleSpeed}M03', 'G90G00G43Z${_n(p.safeZ)}H${p.toolNumber.toString().padLeft(2,'0')}'];
+    final out = <String>['%', p.programNumber, '(${profile.name} CAM - OFFSET ROUGH / SEMI-FINISH / FINISH)', '(DXF:${_safe(p.drawingName)} UNITS:$units THK:${_n(p.thickness)}MM)', '(CONTOURS:${plan.source.contours.length} TOOL:D${_n(p.toolDiameter)} PASSES:${p.totalPasses} CUT-PER-PASS:${_n(p.offsetDistance)})', 'G90G40G49G80G98', 'G21G00${p.workOffset}G17', 'T${p.toolNumber.toString().padLeft(2,'0')}M06', 'S${p.spindleSpeed}M03', 'G90G00G43Z${_n(p.safeZ)}H${p.toolNumber.toString().padLeft(2,'0')}'];
     for (var index = 0; index < plan.passes.length; index++) {
       final pass = plan.passes[index], contour = pass.contour;
       final first = contour.segments.first, tangent = _tangent(first);
@@ -55,6 +55,6 @@ class NcWriter {
 }
 
 class NcOutputParameters {
-  const NcOutputParameters({required this.drawingName,required this.programNumber,required this.workOffset,required this.toolNumber,required this.toolDiameter,required this.thickness,required this.roughPasses,required this.offsetDistance,required this.finishAllowance,required this.feedRough,required this.feedFinish,required this.plungeFeed,required this.spindleSpeed,required this.safeZ,required this.rapidZ,required this.leadInLength,required this.leadOutLength,required this.zOscillation,required this.cutDepth,required this.xOffset,required this.yOffset});
-  final String drawingName,programNumber,workOffset; final int toolNumber,roughPasses,feedRough,feedFinish,plungeFeed,spindleSpeed; final double toolDiameter,thickness,offsetDistance,finishAllowance,safeZ,rapidZ,leadInLength,leadOutLength,zOscillation,cutDepth,xOffset,yOffset;
+  const NcOutputParameters({required this.drawingName,required this.programNumber,required this.workOffset,required this.toolNumber,required this.toolDiameter,required this.thickness,required this.totalPasses,required this.roughPasses,required this.offsetDistance,required this.finishAllowance,required this.feedRough,required this.feedFinish,required this.plungeFeed,required this.spindleSpeed,required this.safeZ,required this.rapidZ,required this.leadInLength,required this.leadOutLength,required this.zOscillation,required this.cutDepth,required this.xOffset,required this.yOffset});
+  final String drawingName,programNumber,workOffset; final int toolNumber,totalPasses,roughPasses,feedRough,feedFinish,plungeFeed,spindleSpeed; final double toolDiameter,thickness,offsetDistance,finishAllowance,safeZ,rapidZ,leadInLength,leadOutLength,zOscillation,cutDepth,xOffset,yOffset;
 }
