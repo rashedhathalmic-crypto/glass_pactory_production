@@ -32,7 +32,7 @@ function dxf(points) {
   return rows.join('\n') + '\n';
 }
 
-window.pdfToDxf2d = async function(bytes, targetWidth, targetHeight, angleDeg) {
+window.pdfToDxf2d = async function(bytes) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   const pdf = await pdfjsLib.getDocument({data}).promise;
   const page = await pdf.getPage(1);
@@ -75,12 +75,11 @@ window.pdfToDxf2d = async function(bytes, targetWidth, targetHeight, angleDeg) {
   }).filter(p => !((p.maxX-p.minX)>viewport.width*.95 && (p.maxY-p.minY)>viewport.height*.95));
   if (!measured.length) throw new Error('No closed vector outline found in the PDF.');
   measured.sort((a,b)=>(b.maxX-b.minX)*(b.maxY-b.minY)-(a.maxX-a.minX)*(a.maxY-a.minY));
-  const shape=measured[0], sourceW=shape.maxX-shape.minX, sourceH=shape.maxY-shape.minY;
-  if (!(targetWidth>0) || !(targetHeight>0)) throw new Error('Length and width must be greater than zero.');
-  const rad=(Number(angleDeg)||0)*Math.PI/180, c=Math.cos(rad), s=Math.sin(rad);
-  let points=shape.points.map(p=>[(p[0]-shape.minX)*targetWidth/sourceW,(p[1]-shape.minY)*targetHeight/sourceH]);
-  points=points.map(p=>[p[0]*c-p[1]*s,p[0]*s+p[1]*c]);
-  const minX=Math.min(...points.map(p=>p[0])), minY=Math.min(...points.map(p=>p[1]));
-  points=points.map(p=>[p[0]-minX,p[1]-minY]);
+  const shape=measured[0];
+  const mmPerPoint = 25.4 / 72 * (page.userUnit || 1);
+  const points=shape.points.map(p=>[
+    (p[0]-shape.minX)*mmPerPoint,
+    (p[1]-shape.minY)*mmPerPoint,
+  ]);
   return dxf(points);
 };
