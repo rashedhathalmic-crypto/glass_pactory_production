@@ -5,6 +5,6 @@ import 'dart:js_util' as js_util;
 import 'dart:typed_data';
 
 Future<String> convertPdfToDxf({required Uint8List bytes}) async {
-  final result = js.context.callMethod<Object>('pdfToDxf2d', [bytes]);
+  final result = js.context.callMethod('pdfToDxf2d', [bytes]);
   return (await js_util.promiseToFuture<Object>(result)).toString();
 }
