@@ -25,17 +25,37 @@ function cubic(points, p0, p1, p2, p3) {
   }
 }
 
-function circleLike(path) {
-  const pts = path.points;
-  if (pts.length < 20) return false;
-  const cx = pts.reduce((sum,p)=>sum+p[0],0)/pts.length;
-  const cy = pts.reduce((sum,p)=>sum+p[1],0)/pts.length;
-  const radii = pts.map(p=>Math.hypot(p[0]-cx,p[1]-cy));
-  const mean = radii.reduce((a,b)=>a+b,0)/radii.length;
-  const variance = radii.reduce((sum,r)=>sum+(r-mean)*(r-mean),0)/radii.length;
-  const width = path.maxX-path.minX, height = path.maxY-path.minY;
-  return mean > 0 && Math.sqrt(variance)/mean < 0.08 &&
-    Math.max(width,height)/Math.max(1e-9,Math.min(width,height)) < 1.25;
+function joinedClosedPaths(paths, tolerance = 1.5) {
+  const closed = paths.filter(p => p.closed && p.points.length >= 3)
+    .map(p => ({points:p.points, closed:true, sourceCount:1}));
+  const pending = paths.filter(p => !p.closed && p.points.length >= 2)
+    .map(p => p.points.slice());
+  while (pending.length) {
+    let chain = pending.shift(), sourceCount = 1, changed = true;
+    while (changed) {
+      changed = false;
+      for (let i=0; i<pending.length; i++) {
+        const next=pending[i], cs=chain[0], ce=chain[chain.length-1];
+        if (near(ce,next[0]) || Math.hypot(ce[0]-next[0][0],ce[1]-next[0][1]) <= tolerance) {
+          chain.push(...next.slice(1)); pending.splice(i,1); sourceCount++; changed=true; break;
+        }
+        if (near(ce,next[next.length-1]) || Math.hypot(ce[0]-next[next.length-1][0],ce[1]-next[next.length-1][1]) <= tolerance) {
+          chain.push(...next.slice(0,-1).reverse()); pending.splice(i,1); sourceCount++; changed=true; break;
+        }
+        if (near(cs,next[next.length-1]) || Math.hypot(cs[0]-next[next.length-1][0],cs[1]-next[next.length-1][1]) <= tolerance) {
+          chain.unshift(...next.slice(0,-1)); pending.splice(i,1); sourceCount++; changed=true; break;
+        }
+        if (near(cs,next[0]) || Math.hypot(cs[0]-next[0][0],cs[1]-next[0][1]) <= tolerance) {
+          chain.unshift(...next.slice(1).reverse()); pending.splice(i,1); sourceCount++; changed=true; break;
+        }
+      }
+    }
+    if (chain.length >= 3 && Math.hypot(chain[0][0]-chain[chain.length-1][0],chain[0][1]-chain[chain.length-1][1]) <= tolerance) {
+      chain.pop();
+      closed.push({points:chain, closed:true, sourceCount});
+    }
+  }
+  return closed;
 }
 
 function dxf(points) {
@@ -54,7 +74,7 @@ window.pdfToDxf2d = async function(bytes) {
   const O = pdfjsLib.OPS;
   let matrix = [1,0,0,1,0,0], stack = [], active = [], paths = [];
   const finish = () => {
-    if (active.length >= 3) {
+    if (active.length >= 2) {
       const closed = near(active[0], active[active.length - 1]);
       if (closed) active.pop();
       paths.push({points: active, closed});
@@ -82,14 +102,15 @@ window.pdfToDxf2d = async function(bytes) {
     } else if (fn === O.stroke || fn === O.closeStroke || fn === O.fill || fn === O.eoFill || fn === O.fillStroke || fn === O.eoFillStroke || fn === O.closeFillStroke || fn === O.closeEOFillStroke || fn === O.endPath) finish();
   }
   finish();
-  const measured = paths.filter(p => p.closed && p.points.length >= 3).map(p => {
+  const measured = joinedClosedPaths(paths).map(p => {
     const xs=p.points.map(q=>q[0]), ys=p.points.map(q=>q[1]);
     return {...p,minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)};
   }).filter(p => !((p.maxX-p.minX)>viewport.width*.95 && (p.maxY-p.minY)>viewport.height*.95));
-  const nonCircular = measured.filter(p => !circleLike(p));
-  if (!nonCircular.length) throw new Error('No non-circular closed profile found in the PDF.');
-  nonCircular.sort((a,b)=>(b.maxX-b.minX)*(b.maxY-b.minY)-(a.maxX-a.minX)*(a.maxY-a.minY));
-  const shape=nonCircular[0];
+  if (!measured.length) throw new Error('No closed profile found in the PDF.');
+  const joined = measured.filter(p => p.sourceCount > 1);
+  const candidates = joined.length ? joined : measured;
+  candidates.sort((a,b)=>(b.maxX-b.minX)*(b.maxY-b.minY)-(a.maxX-a.minX)*(a.maxY-a.minY));
+  const shape=candidates[0];
   const mmPerPoint = 25.4 / 72 * (page.userUnit || 1);
   const points=shape.points.map(p=>[
     (p[0]-shape.minX)*mmPerPoint,
