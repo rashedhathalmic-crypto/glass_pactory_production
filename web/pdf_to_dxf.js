@@ -83,3 +83,10 @@ window.pdfToDxf2d = async function(bytes) {
   ]);
   return dxf(points);
 };
+
+window.pdfToDxf2dCallback = function(bytes, onSuccess, onError) {
+  window.pdfToDxf2d(bytes)
+    .then(result => onSuccess(result))
+    .catch(error => onError(error && error.message ? error.message : String(error)));
+};
+
