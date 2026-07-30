@@ -50,14 +50,19 @@ class PdfProfileAnalysis {
   const PdfProfileAnalysis({
     required this.drawingScale,
     required this.profiles,
+    this.sourceKind = 'pdf',
   });
 
   final double drawingScale;
   final List<PdfProfileCandidate> profiles;
+  final String sourceKind;
+
+  bool get isClipboardImage => sourceKind == 'clipboardImage';
 
   factory PdfProfileAnalysis.fromJson(Map<String, dynamic> json) {
     return PdfProfileAnalysis(
       drawingScale: (json['drawingScale'] as num).toDouble(),
+      sourceKind: json['sourceKind'] as String? ?? 'pdf',
       profiles: (json['profiles'] as List<dynamic>)
           .map(
             (profile) => PdfProfileCandidate.fromJson(
