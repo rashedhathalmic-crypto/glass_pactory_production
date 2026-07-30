@@ -835,6 +835,35 @@ async function rotateImageBlobClockwise(blob) {
   return {blob: rotated, originalWidth, originalHeight};
 }
 
+async function upscaleImageForOcr(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const factor = Math.max(
+    1,
+    Math.min(3, 2000 / Math.max(bitmap.width, bitmap.height)),
+  );
+  const width = Math.round(bitmap.width * factor);
+  const height = Math.round(bitmap.height * factor);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+  const upscaled = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      value => value
+        ? resolve(value)
+        : reject(new Error('تعذر تجهيز الصورة لقراءة الأرقام.')),
+      'image/png',
+    );
+  });
+  return {blob: upscaled, width, height};
+}
+
 function numericWordsFromTsv(tsv, orientation, originalWidth, originalHeight) {
   if (!tsv) return [];
   const readings = [];
@@ -844,7 +873,7 @@ function numericWordsFromTsv(tsv, orientation, originalWidth, originalHeight) {
     if (columns.length < 12) continue;
     const confidence = Number(columns[10]);
     const raw = columns.slice(11).join('\t').trim().replace(',', '.');
-    if (confidence < 40 || !/^-?\d+(?:\.\d+)?$/.test(raw)) continue;
+    if (confidence < 75 || !/^-?\d+(?:\.\d+)?$/.test(raw)) continue;
     const left = Number(columns[6]);
     const top = Number(columns[7]);
     const width = Number(columns[8]);
@@ -901,12 +930,15 @@ async function readWrittenDimensions(blob) {
       tessedit_char_whitelist: '0123456789.-',
       tessedit_pageseg_mode: '11',
     });
-    const originalBitmap = await createImageBitmap(blob);
-    const originalWidth = originalBitmap.width;
-    const originalHeight = originalBitmap.height;
-    originalBitmap.close();
-    const original = await worker.recognize(blob, {}, {tsv: true});
-    const rotatedImage = await rotateImageBlobClockwise(blob);
+    const prepared = await upscaleImageForOcr(blob);
+    const originalWidth = prepared.width;
+    const originalHeight = prepared.height;
+    const original = await worker.recognize(
+      prepared.blob,
+      {},
+      {tsv: true},
+    );
+    const rotatedImage = await rotateImageBlobClockwise(prepared.blob);
     const rotated = await worker.recognize(
       rotatedImage.blob,
       {},
