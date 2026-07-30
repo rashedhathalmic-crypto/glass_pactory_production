@@ -46,23 +46,51 @@ class PdfProfileCandidate {
   }
 }
 
+class ImageDimensionReading {
+  const ImageDimensionReading({
+    required this.value,
+    required this.confidence,
+  });
+
+  final String value;
+  final double confidence;
+
+  factory ImageDimensionReading.fromJson(Map<String, dynamic> json) {
+    return ImageDimensionReading(
+      value: json['value'] as String,
+      confidence: (json['confidence'] as num).toDouble(),
+    );
+  }
+}
+
 class PdfProfileAnalysis {
   const PdfProfileAnalysis({
     required this.drawingScale,
     required this.profiles,
     this.sourceKind = 'pdf',
+    this.dimensionReadings = const [],
   });
 
   final double drawingScale;
   final List<PdfProfileCandidate> profiles;
   final String sourceKind;
+  final List<ImageDimensionReading> dimensionReadings;
 
-  bool get isClipboardImage => sourceKind == 'clipboardImage';
+  bool get isImageSource =>
+      sourceKind == 'clipboardImage' || sourceKind == 'imageOcr';
 
   factory PdfProfileAnalysis.fromJson(Map<String, dynamic> json) {
     return PdfProfileAnalysis(
       drawingScale: (json['drawingScale'] as num).toDouble(),
       sourceKind: json['sourceKind'] as String? ?? 'pdf',
+      dimensionReadings: (json['dimensionReadings'] as List<dynamic>? ??
+              const <dynamic>[])
+          .map(
+            (reading) => ImageDimensionReading.fromJson(
+              reading as Map<String, dynamic>,
+            ),
+          )
+          .toList(growable: false),
       profiles: (json['profiles'] as List<dynamic>)
           .map(
             (profile) => PdfProfileCandidate.fromJson(
