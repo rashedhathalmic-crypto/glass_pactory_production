@@ -9,3 +9,6 @@ Future<String> convertPdfToDxf({required Uint8List bytes}) =>
 
 Future<PdfProfileAnalysis> analyzePdfProfiles({required Uint8List bytes}) =>
     impl.analyzePdfProfiles(bytes: bytes);
+
+Future<PdfProfileAnalysis> analyzeClipboardDrawing() =>
+    impl.analyzeClipboardDrawing();
