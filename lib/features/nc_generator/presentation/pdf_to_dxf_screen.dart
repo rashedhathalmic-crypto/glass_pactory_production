@@ -22,8 +22,10 @@ class PdfToDxfScreen extends StatefulWidget {
 
 class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
   final _actualWidth = TextEditingController();
+  final List<TextEditingController> _dimensionControllers = [];
 
   PickedFile? _pdf;
+  PickedFile? _drawingImage;
   PdfProfileAnalysis? _analysis;
   int _selectedIndex = 0;
   String? _error;
@@ -42,7 +44,7 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
     if (selected == null) return 0;
     final entered = double.tryParse(_actualWidth.text.replaceAll(',', '.'));
     if (entered != null) return entered;
-    return _analysis?.isClipboardImage ?? false ? 0 : selected.width;
+    return _analysis?.isImageSource ?? false ? 0 : selected.width;
   }
 
   double get _uniformScale {
@@ -61,10 +63,26 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
 
   @override
   void dispose() {
+    for (final controller in _dimensionControllers) {
+      controller.dispose();
+    }
     _actualWidth
       ..removeListener(_widthChanged)
       ..dispose();
     super.dispose();
+  }
+
+  void _setDimensionReadings(List<ImageDimensionReading> readings) {
+    for (final controller in _dimensionControllers) {
+      controller.dispose();
+    }
+    _dimensionControllers
+      ..clear()
+      ..addAll(
+        readings.map(
+          (reading) => TextEditingController(text: reading.value),
+        ),
+      );
   }
 
   void _widthChanged() {
@@ -78,6 +96,7 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
 
     setState(() {
       _pdf = files.first;
+      _drawingImage = null;
       _analysis = null;
       _selectedIndex = 0;
       _busy = true;
@@ -87,6 +106,7 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
         RegExp(r'\.pdf$', caseSensitive: false),
         '',
       );
+      _setDimensionReadings(const []);
     });
 
     try {
@@ -116,28 +136,37 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
     }
   }
 
-  Future<void> _pasteAndAnalyze() async {
+  Future<void> _pickImageAndAnalyze() async {
+    final files = await pickFiles(
+      extensions: const ['png', 'jpg', 'jpeg', 'webp'],
+    );
+    if (files.isEmpty || !mounted) return;
+    final file = files.first;
     setState(() {
       _pdf = null;
+      _drawingImage = file;
       _analysis = null;
       _selectedIndex = 0;
       _busy = true;
       _error = null;
-      _outputBaseName = 'PASTED_DRAWING';
+      _outputBaseName = file.fileName.replaceAll(
+        RegExp(r'\.(png|jpe?g|webp)$', caseSensitive: false),
+        '',
+      );
       _dimensionsConfirmed = false;
+      _setDimensionReadings(const []);
     });
 
     try {
-      final analysis = await analyzeClipboardDrawing();
-      if (analysis.profiles.isEmpty) {
-        throw const FormatException(
-          'لم يتم العثور على رسم ثنائي مغلق في الصورة المنسوخة.',
-        );
-      }
+      final analysis = await analyzeDrawingImage(
+        bytes: file.bytes,
+        contentType: file.contentType,
+      );
       if (!mounted) return;
       setState(() {
         _analysis = analysis;
         _selectedIndex = 0;
+        _setDimensionReadings(analysis.dimensionReadings);
         _actualWidth.clear();
       });
     } on Object catch (error) {
@@ -154,13 +183,25 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
     }
   }
 
+  void _addDimensionField() {
+    setState(() {
+      _dimensionControllers.add(TextEditingController());
+    });
+  }
+
+  void _removeDimensionField(int index) {
+    setState(() {
+      _dimensionControllers.removeAt(index).dispose();
+    });
+  }
+
   void _selectProfile(int index) {
     final profile = _analysis!.profiles[index];
     setState(() {
       _selectedIndex = index;
       _dimensionsConfirmed = false;
       _error = null;
-      _actualWidth.text = _analysis!.isClipboardImage
+      _actualWidth.text = _analysis!.isImageSource
           ? ''
           : profile.width.toStringAsFixed(3);
     });
@@ -263,33 +304,33 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             PageHeader(
-              title: 'PDF → DXF 2D — Verified Profile',
+              title: 'Drawing Image / PDF → DXF 2D',
               subtitle:
-                  'الصق الرسمة المحددة أو ارفع PDF، ثم راجع الطول والعرض والزوايا وحمّل DXF.',
+                  'ارفع صورة أو قصاصة؛ تُقرأ الأرقام المكتوبة فقط وتظهر كقيم قابلة للتعديل.',
               actions: [
                 OutlinedButton.icon(
-                  onPressed: _busy ? null : _pasteAndAnalyze,
-                  icon: const Icon(Icons.content_paste),
-                  label: const Text('لصق الرسمة'),
+                  onPressed: _busy ? null : _pickAndAnalyze,
+                  icon: const Icon(Icons.picture_as_pdf),
+                  label: const Text('رفع PDF'),
                 ),
                 FilledButton.icon(
-                  onPressed: _busy ? null : _pickAndAnalyze,
+                  onPressed: _busy ? null : _pickImageAndAnalyze,
                   icon: _busy
                       ? const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Icon(Icons.picture_as_pdf),
-                  label: Text(_busy ? 'جاري التحليل…' : 'رفع وتحليل PDF'),
+                      : const Icon(Icons.image_outlined),
+                  label: Text(_busy ? 'جاري القراءة…' : 'رفع صورة أو قصاصة'),
                 ),
               ],
             ),
             const SizedBox(height: 20),
             AppCard(
-              title: 'لصق الرسمة مباشرة',
+              title: 'رفع صورة الرسم',
               child: InkWell(
-                onTap: _busy ? null : _pasteAndAnalyze,
+                onTap: _busy ? null : _pickImageAndAnalyze,
                 borderRadius: BorderRadius.circular(14),
                 child: Container(
                   height: 150,
@@ -306,20 +347,20 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(
-                        Icons.content_paste_go,
+                        Icons.add_photo_alternate_outlined,
                         size: 38,
                         color: AppColors.darkBlue,
                       ),
                       const SizedBox(height: 10),
                       Text(
                         _busy
-                            ? 'جاري استخراج الرسم…'
-                            : 'انسخ الرسمة من PDF ثم اضغط هنا للصقها',
+                            ? 'جاري قراءة الأرقام المكتوبة…'
+                            : 'اضغط هنا لرفع صورة أو قصاصة الرسم',
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 4),
                       const Text(
-                        'بعد الاستخراج أدخل العرض الحقيقي بالملليمتر.',
+                        'لن تُحسب أو تُضاف أي قيمة غير مكتوبة في الصورة.',
                         style: TextStyle(color: AppColors.textSecondary),
                       ),
                     ],
@@ -334,15 +375,15 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    _analysis?.isClipboardImage ?? false
-                        ? 'تم لصق الرسمة من الحافظة.'
-                        : _pdf?.fileName ?? 'لم يتم رفع ملف PDF أو لصق رسمة.',
+                    _analysis?.isImageSource ?? false
+                        ? _drawingImage?.fileName ?? 'تم رفع صورة الرسم.'
+                        : _pdf?.fileName ?? 'لم يتم رفع ملف بعد.',
                   ),
                   if (_analysis != null) ...[
                     const SizedBox(height: 8),
                     Text(
-                      _analysis!.isClipboardImage
-                          ? 'عدد المحيطات المغلقة: ${_analysis!.profiles.length}'
+                      _analysis!.isImageSource
+                          ? 'الأرقام المقروءة: ${_dimensionControllers.length}'
                           : 'مقياس الرسم المكتشف: 1:${_analysis!.drawingScale.toStringAsFixed(_analysis!.drawingScale % 1 == 0 ? 0 : 2)}'
                               '  •  عدد المساقط المحتملة: ${_analysis!.profiles.length}',
                       style: const TextStyle(color: AppColors.textSecondary),
@@ -360,19 +401,111 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
             ),
             if (_analysis != null) ...[
               const SizedBox(height: 16),
-              AppCard(
-                title: '2 — اختر المسقط الثنائي الكامل',
-                child: _profileSelector(),
-              ),
-              const SizedBox(height: 16),
-              AppCard(
-                title: '3 — راجع الشكل والمقاسات والزوايا',
-                child: _verificationPanel(),
-              ),
+              if (_analysis!.isImageSource)
+                AppCard(
+                  title: '2 — الرسمة والأرقام المكتوبة',
+                  child: _imageDimensionPanel(),
+                )
+              else
+                AppCard(
+                  title: '2 — اختر المسقط الثنائي الكامل',
+                  child: _profileSelector(),
+                ),
+              if (_analysis!.profiles.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                AppCard(
+                  title: '3 — راجع الرسم قبل تحويله',
+                  child: _verificationPanel(),
+                ),
+              ],
             ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _imageDimensionPanel() {
+    final image = _drawingImage;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final preview = Container(
+          constraints: const BoxConstraints(minHeight: 280, maxHeight: 520),
+          padding: const EdgeInsets.all(12),
+          color: Colors.white,
+          child: image == null
+              ? const Center(child: Text('لا توجد صورة.'))
+              : Image.memory(
+                  image.bytes,
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                ),
+        );
+        final fields = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'القيم المكتوبة في الصورة',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            if (_dimensionControllers.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  'لم يُقرأ رقم. يمكنك إضافته يدويًا.',
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+              ),
+            ...List<Widget>.generate(_dimensionControllers.length, (index) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _dimensionControllers[index],
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: 'القيمة ${index + 1}',
+                          suffixText: 'mm',
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'حذف القيمة',
+                      onPressed: () => _removeDimensionField(index),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            OutlinedButton.icon(
+              onPressed: _addDimensionField,
+              icon: const Icon(Icons.add),
+              label: const Text('إضافة قيمة'),
+            ),
+          ],
+        );
+
+        if (constraints.maxWidth < 850) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [preview, const SizedBox(height: 18), fields],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(flex: 3, child: preview),
+            const SizedBox(width: 24),
+            Expanded(flex: 2, child: fields),
+          ],
+        );
+      },
     );
   }
 
@@ -428,7 +561,7 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
                 Text(
                   '${profile.width.toStringAsFixed(2)} × '
                   '${profile.height.toStringAsFixed(2)} '
-                  '${_analysis!.isClipboardImage ? 'px' : 'mm'}',
+                  '${_analysis!.isImageSource ? 'px' : 'mm'}',
                   textDirection: TextDirection.ltr,
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontWeight: FontWeight.w600),
@@ -481,18 +614,54 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
     PdfProfileCandidate profile,
     List<double> angles,
   ) {
+    if (_analysis!.isImageSource) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'لا تُطبّق أي قيمة تلقائيًا على الرسم.',
+            style: TextStyle(color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _actualWidth,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'العرض الفعلي الذي تختاره للتحويل',
+              suffixText: 'mm',
+            ),
+          ),
+          const SizedBox(height: 14),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _dimensionsConfirmed,
+            onChanged: (value) {
+              setState(() => _dimensionsConfirmed = value ?? false);
+            },
+            title: const Text('تأكدت أن الرسم والقيمة التي أدخلتها صحيحة'),
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: _dimensionsConfirmed ? _downloadSelected : null,
+            icon: const Icon(Icons.download),
+            label: const Text('تحميل DXF'),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _metric(
-          _analysis!.isClipboardImage ? 'عرض الصورة' : 'العرض المكتشف',
+          _analysis!.isImageSource ? 'عرض الصورة' : 'العرض المكتشف',
           '${profile.width.toStringAsFixed(3)} '
-              '${_analysis!.isClipboardImage ? 'px' : 'mm'}',
+              '${_analysis!.isImageSource ? 'px' : 'mm'}',
         ),
         _metric(
-          _analysis!.isClipboardImage ? 'ارتفاع الصورة' : 'الارتفاع المكتشف',
+          _analysis!.isImageSource ? 'ارتفاع الصورة' : 'الارتفاع المكتشف',
           '${profile.height.toStringAsFixed(3)} '
-              '${_analysis!.isClipboardImage ? 'px' : 'mm'}',
+              '${_analysis!.isImageSource ? 'px' : 'mm'}',
         ),
         const SizedBox(height: 12),
         TextField(
