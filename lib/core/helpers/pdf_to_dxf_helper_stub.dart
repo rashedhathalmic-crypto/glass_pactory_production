@@ -15,3 +15,12 @@ Future<PdfProfileAnalysis> analyzeClipboardDrawing() {
     'Clipboard drawing analysis is available in the web app.',
   );
 }
+
+Future<PdfProfileAnalysis> analyzeDrawingImage({
+  required Uint8List bytes,
+  required String contentType,
+}) {
+  throw UnsupportedError(
+    'Drawing image analysis is available in the web app.',
+  );
+}
