@@ -183,18 +183,6 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
     }
   }
 
-  void _addDimensionField() {
-    setState(() {
-      _dimensionControllers.add(TextEditingController());
-    });
-  }
-
-  void _removeDimensionField(int index) {
-    setState(() {
-      _dimensionControllers.removeAt(index).dispose();
-    });
-  }
-
   void _selectProfile(int index) {
     final profile = _analysis!.profiles[index];
     setState(() {
@@ -427,85 +415,130 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
 
   Widget _imageDimensionPanel() {
     final image = _drawingImage;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final preview = Container(
-          constraints: const BoxConstraints(minHeight: 280, maxHeight: 520),
-          padding: const EdgeInsets.all(12),
-          color: Colors.white,
-          child: image == null
-              ? const Center(child: Text('لا توجد صورة.'))
-              : Image.memory(
-                  image.bytes,
-                  fit: BoxFit.contain,
-                  gaplessPlayback: true,
-                ),
-        );
-        final fields = Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'القيم المكتوبة في الصورة',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 10),
-            if (_dimensionControllers.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  'لم يُقرأ رقم. يمكنك إضافته يدويًا.',
-                  style: TextStyle(color: AppColors.textSecondary),
-                ),
-              ),
-            ...List<Widget>.generate(_dimensionControllers.length, (index) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _dimensionControllers[index],
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: 'القيمة ${index + 1}',
-                          suffixText: 'mm',
-                        ),
+    final analysis = _analysis!;
+    final width = analysis.sourceImageWidth;
+    final height = analysis.sourceImageHeight;
+    final aspectRatio = width > 0 && height > 0 ? width / height : 1.4;
+    if (image == null) {
+      return const SizedBox(
+        height: 280,
+        child: Center(child: Text('لا توجد صورة.')),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'اضغط على أي رقم داخل الرسمة لتعديله في مكانه.',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1050),
+            child: AspectRatio(
+              aspectRatio: aspectRatio,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.memory(
+                        image.bytes,
+                        fit: BoxFit.fill,
+                        gaplessPlayback: true,
                       ),
-                    ),
-                    IconButton(
-                      tooltip: 'حذف القيمة',
-                      onPressed: () => _removeDimensionField(index),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-              );
-            }),
-            OutlinedButton.icon(
-              onPressed: _addDimensionField,
-              icon: const Icon(Icons.add),
-              label: const Text('إضافة قيمة'),
+                      ...List<Widget>.generate(
+                        math.min(
+                          analysis.dimensionReadings.length,
+                          _dimensionControllers.length,
+                        ).toInt(),
+                        (index) {
+                          final reading =
+                              analysis.dimensionReadings[index];
+                          final editorWidth =
+                              reading.vertical ? 34.0 : 76.0;
+                          final editorHeight =
+                              reading.vertical ? 76.0 : 34.0;
+                          final left = (reading.x *
+                                      constraints.maxWidth -
+                                  editorWidth / 2)
+                              .clamp(
+                                0.0,
+                                math.max(
+                                  0.0,
+                                  constraints.maxWidth - editorWidth,
+                                ),
+                              )
+                              .toDouble();
+                          final top = (reading.y *
+                                      constraints.maxHeight -
+                                  editorHeight / 2)
+                              .clamp(
+                                0.0,
+                                math.max(
+                                  0.0,
+                                  constraints.maxHeight - editorHeight,
+                                ),
+                              )
+                              .toDouble();
+                          Widget editor = SizedBox(
+                            width: 76,
+                            height: 34,
+                            child: TextField(
+                              controller: _dimensionControllers[index],
+                              textAlign: TextAlign.center,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              decoration: InputDecoration(
+                                isDense: true,
+                                filled: true,
+                                fillColor: Colors.white.withValues(alpha: .94),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 8,
+                                ),
+                                border: const OutlineInputBorder(),
+                              ),
+                            ),
+                          );
+                          if (reading.vertical) {
+                            editor = RotatedBox(
+                              quarterTurns: 3,
+                              child: editor,
+                            );
+                          }
+                          return Positioned(
+                            left: left,
+                            top: top,
+                            width: editorWidth,
+                            height: editorHeight,
+                            child: editor,
+                          );
+                        },
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
-          ],
-        );
-
-        if (constraints.maxWidth < 850) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [preview, const SizedBox(height: 18), fields],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(flex: 3, child: preview),
-            const SizedBox(width: 24),
-            Expanded(flex: 2, child: fields),
-          ],
-        );
-      },
+          ),
+        ),
+        if (_dimensionControllers.isEmpty) ...[
+          const SizedBox(height: 12),
+          const Text(
+            'لم يتم العثور على أرقام مكتوبة في الصورة.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppColors.error),
+          ),
+        ],
+      ],
     );
   }
 
