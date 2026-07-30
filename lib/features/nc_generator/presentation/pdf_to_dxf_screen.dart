@@ -34,6 +34,9 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
   bool _dimensionsConfirmed = false;
 
   PdfProfileCandidate? get _selected {
+    if (_analysis?.isImageSource ?? false) {
+      return _profileFromImageDimensions();
+    }
     final profiles = _analysis?.profiles;
     if (profiles == null || profiles.isEmpty) return null;
     return profiles[_selectedIndex.clamp(0, profiles.length - 1).toInt()];
@@ -42,6 +45,7 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
   double get _targetWidth {
     final selected = _selected;
     if (selected == null) return 0;
+    if (_analysis?.isImageSource ?? false) return selected.width;
     final entered = double.tryParse(_actualWidth.text.replaceAll(',', '.'));
     if (entered != null) return entered;
     return _analysis?.isImageSource ?? false ? 0 : selected.width;
@@ -50,6 +54,7 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
   double get _uniformScale {
     final selected = _selected;
     if (selected == null || selected.width <= 0) return 1;
+    if (_analysis?.isImageSource ?? false) return 1;
     return _targetWidth / selected.width;
   }
 
@@ -80,9 +85,107 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
       ..clear()
       ..addAll(
         readings.map(
-          (reading) => TextEditingController(text: reading.value),
+          (reading) {
+            final controller = TextEditingController(text: reading.value);
+            controller.addListener(_dimensionChanged);
+            return controller;
+          },
         ),
       );
+  }
+
+  void _dimensionChanged() {
+    if (!mounted || !(_analysis?.isImageSource ?? false)) return;
+    setState(() => _dimensionsConfirmed = false);
+  }
+
+  double? _dimensionValue(int index) {
+    if (index < 0 || index >= _dimensionControllers.length) return null;
+    return double.tryParse(
+      _dimensionControllers[index].text.trim().replaceAll(',', '.'),
+    );
+  }
+
+  PdfProfileCandidate? _profileFromImageDimensions() {
+    final analysis = _analysis;
+    if (analysis == null || !analysis.isImageSource) return null;
+    final count = math.min(
+      analysis.dimensionReadings.length,
+      _dimensionControllers.length,
+    );
+    final horizontal = <int>[];
+    final vertical = <int>[];
+    for (var index = 0; index < count; index++) {
+      if (analysis.dimensionReadings[index].vertical) {
+        vertical.add(index);
+      } else {
+        horizontal.add(index);
+      }
+    }
+    if (horizontal.length != 3 || vertical.length != 3) return null;
+
+    horizontal.sort(
+      (a, b) => analysis.dimensionReadings[a].y.compareTo(
+        analysis.dimensionReadings[b].y,
+      ),
+    );
+    final topRun = _dimensionValue(horizontal.first);
+    final bottomRun = _dimensionValue(horizontal[1]);
+    final overallWidth = _dimensionValue(horizontal.last);
+
+    vertical.sort(
+      (a, b) => analysis.dimensionReadings[a].x.compareTo(
+        analysis.dimensionReadings[b].x,
+      ),
+    );
+    final overallHeight = _dimensionValue(vertical.first);
+    final offsets = vertical.skip(1).toList()
+      ..sort(
+        (a, b) => analysis.dimensionReadings[a].y.compareTo(
+          analysis.dimensionReadings[b].y,
+        ),
+      );
+    final topDrop = _dimensionValue(offsets.first);
+    final bottomRise = _dimensionValue(offsets.last);
+
+    if (topRun == null ||
+        bottomRun == null ||
+        overallWidth == null ||
+        overallHeight == null ||
+        topDrop == null ||
+        bottomRise == null ||
+        topRun <= 0 ||
+        bottomRun <= 0 ||
+        overallWidth <= 0 ||
+        overallHeight <= 0 ||
+        topDrop <= 0 ||
+        bottomRise <= 0) {
+      return null;
+    }
+    if (topRun >= overallWidth ||
+        bottomRun >= overallWidth ||
+        topDrop >= overallHeight ||
+        bottomRise >= overallHeight) {
+      return null;
+    }
+
+    final points = <PdfProfilePoint>[
+      PdfProfilePoint(0, overallHeight - topDrop),
+      PdfProfilePoint(topRun, overallHeight),
+      PdfProfilePoint(overallWidth, overallHeight),
+      PdfProfilePoint(overallWidth, 0),
+      PdfProfilePoint(bottomRun, 0),
+      PdfProfilePoint(0, bottomRise),
+    ];
+    return PdfProfileCandidate(
+      id: 0,
+      suggested: false,
+      inferredClosure: false,
+      vertexCount: points.length,
+      width: overallWidth,
+      height: overallHeight,
+      points: points,
+    );
   }
 
   void _widthChanged() {
@@ -399,7 +502,7 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
                   title: '2 — اختر المسقط الثنائي الكامل',
                   child: _profileSelector(),
                 ),
-              if (_analysis!.profiles.isNotEmpty) ...[
+              if (_selected != null) ...[
                 const SizedBox(height: 16),
                 AppCard(
                   title: '3 — راجع الرسم قبل تحويله',
@@ -457,9 +560,9 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
                           final reading =
                               analysis.dimensionReadings[index];
                           final editorWidth =
-                              reading.vertical ? 34.0 : 76.0;
+                              reading.vertical ? 38.0 : 94.0;
                           final editorHeight =
-                              reading.vertical ? 76.0 : 34.0;
+                              reading.vertical ? 94.0 : 38.0;
                           final left = (reading.x *
                                       constraints.maxWidth -
                                   editorWidth / 2)
@@ -483,8 +586,8 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
                               )
                               .toDouble();
                           Widget editor = SizedBox(
-                            width: 76,
-                            height: 34,
+                            width: 94,
+                            height: 38,
                             child: TextField(
                               controller: _dimensionControllers[index],
                               textAlign: TextAlign.center,
@@ -499,10 +602,11 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
                               decoration: InputDecoration(
                                 isDense: true,
                                 filled: true,
+                                suffixText: 'mm',
                                 fillColor: Colors.white.withValues(alpha: .94),
                                 contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 8,
+                                  horizontal: 4,
+                                  vertical: 9,
                                 ),
                                 border: const OutlineInputBorder(),
                               ),
@@ -651,18 +755,18 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            'لا تُطبّق أي قيمة تلقائيًا على الرسم.',
-            style: TextStyle(color: AppColors.textSecondary),
+          _metric(
+            'العرض النهائي',
+            '${profile.width.toStringAsFixed(3)} mm',
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _actualWidth,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'العرض الفعلي الذي تختاره للتحويل',
-              suffixText: 'mm',
-            ),
+          _metric(
+            'الارتفاع النهائي',
+            '${profile.height.toStringAsFixed(3)} mm',
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'الرسم والـDXF محسوبان مباشرة من قيم mm المعدلة داخل الصورة.',
+            style: TextStyle(color: AppColors.textSecondary),
           ),
           const SizedBox(height: 14),
           CheckboxListTile(
@@ -671,7 +775,7 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
             onChanged: (value) {
               setState(() => _dimensionsConfirmed = value ?? false);
             },
-            title: const Text('تأكدت أن الرسم والقيمة التي أدخلتها صحيحة'),
+            title: const Text('تأكدت أن الرسم وجميع قيم mm صحيحة'),
             controlAffinity: ListTileControlAffinity.leading,
           ),
           const SizedBox(height: 8),
