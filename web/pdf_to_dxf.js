@@ -250,13 +250,14 @@ function distanceToBox(point, box) {
   return Math.hypot(dx, dy);
 }
 
-function chooseProfile(paths, textItems, viewport) {
+function rankProfiles(paths, textItems, viewport) {
   const anchors = profileAnchors(textItems, viewport);
   const pageArea = viewport.width * viewport.height;
 
   const measured = buildProfileCandidates(paths)
     .map(candidate => ({...candidate, ...bounds(candidate.points)}))
     .filter(candidate =>
+      candidate.points.length >= 4 &&
       candidate.width > viewport.width * 0.015 &&
       candidate.height > viewport.height * 0.015 &&
       candidate.width < viewport.width * 0.96 &&
@@ -293,7 +294,7 @@ function chooseProfile(paths, textItems, viewport) {
   }
 
   measured.sort((a, b) => b.score - a.score);
-  return measured[0];
+  return measured;
 }
 
 function dxf(points) {
@@ -316,7 +317,7 @@ function dxf(points) {
   return rows.join('\n') + '\n';
 }
 
-window.pdfToDxf2d = async function(bytes) {
+async function analyzePdf2d(bytes) {
   const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   const pdf = await pdfjsLib.getDocument({data}).promise;
   const page = await pdf.getPage(1);
@@ -418,18 +419,50 @@ window.pdfToDxf2d = async function(bytes) {
   }
   finish();
 
-  const shape = chooseProfile(paths, textContent.items, viewport);
+  const shapes = rankProfiles(paths, textContent.items, viewport);
   const scale = drawingScale(textContent.items);
   const mmPerPoint = 25.4 / 72 * (page.userUnit || 1) * scale;
-  const points = shape.points.map(point => [
-    (point[0] - shape.minX) * mmPerPoint,
-    (point[1] - shape.minY) * mmPerPoint,
-  ]);
-  return dxf(points);
+  const profiles = shapes.slice(0, 10).map((shape, index) => {
+    const points = shape.points.map(point => [
+      (point[0] - shape.minX) * mmPerPoint,
+      (point[1] - shape.minY) * mmPerPoint,
+    ]);
+    return {
+      id: index,
+      suggested: index === 0,
+      inferredClosure: shape.impliedClose,
+      vertexCount: points.length,
+      width: shape.width * mmPerPoint,
+      height: shape.height * mmPerPoint,
+      points,
+    };
+  });
+  return {drawingScale: scale, profiles};
+}
+
+window.pdfAnalyze2d = async function(bytes) {
+  const analysis = await analyzePdf2d(bytes);
+  return JSON.stringify(analysis);
+};
+
+window.pdfToDxf2d = async function(bytes) {
+  const analysis = await analyzePdf2d(bytes);
+  if (!analysis.profiles.length) {
+    throw new Error('No usable part profile found in the PDF.');
+  }
+  return dxf(analysis.profiles[0].points);
 };
 
 window.pdfToDxf2dCallback = function(bytes, onSuccess, onError) {
   window.pdfToDxf2d(bytes)
+    .then(result => onSuccess(result))
+    .catch(error => onError(
+      error && error.message ? error.message : String(error),
+    ));
+};
+
+window.pdfAnalyze2dCallback = function(bytes, onSuccess, onError) {
+  window.pdfAnalyze2d(bytes)
     .then(result => onSuccess(result))
     .catch(error => onError(
       error && error.message ? error.message : String(error),
