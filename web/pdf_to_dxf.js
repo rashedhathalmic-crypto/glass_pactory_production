@@ -861,6 +861,7 @@ function numericWordsFromTsv(tsv, orientation, originalWidth, originalHeight) {
       confidence,
       x: x / originalWidth,
       y: y / originalHeight,
+      vertical: orientation === 'rotated',
     });
   }
   return readings;
@@ -881,6 +882,9 @@ function mergeExactOcrReadings(readings) {
   return merged.map(reading => ({
     value: reading.value,
     confidence: reading.confidence,
+    x: reading.x,
+    y: reading.y,
+    vertical: reading.vertical,
   }));
 }
 
@@ -933,6 +937,10 @@ window.drawingImageAnalyze2d = async function(bytes, contentType) {
     type: contentType || 'image/png',
   });
   const dimensionReadings = await readWrittenDimensions(blob);
+  const bitmap = await createImageBitmap(blob);
+  const sourceImageWidth = bitmap.width;
+  const sourceImageHeight = bitmap.height;
+  bitmap.close();
   let analysis;
   try {
     analysis = await analyzeClipboardBlob(blob);
@@ -940,6 +948,8 @@ window.drawingImageAnalyze2d = async function(bytes, contentType) {
     analysis = {drawingScale: 1, profiles: []};
   }
   analysis.sourceKind = 'imageOcr';
+  analysis.sourceImageWidth = sourceImageWidth;
+  analysis.sourceImageHeight = sourceImageHeight;
   analysis.dimensionReadings = dimensionReadings;
   return JSON.stringify(analysis);
 };
