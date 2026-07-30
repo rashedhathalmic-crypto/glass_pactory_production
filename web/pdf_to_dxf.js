@@ -795,6 +795,168 @@ async function analyzeClipboardBlob(blob) {
   };
 }
 
+let tesseractLoader;
+
+function loadTesseract() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  if (tesseractLoader) return tesseractLoader;
+  tesseractLoader = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src =
+      'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.async = true;
+    script.onload = () => resolve(window.Tesseract);
+    script.onerror = () => reject(new Error('تعذر تحميل قارئ الأرقام.'));
+    document.head.appendChild(script);
+  });
+  return tesseractLoader;
+}
+
+async function rotateImageBlobClockwise(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.height;
+  canvas.height = bitmap.width;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.translate(canvas.width, 0);
+  context.rotate(Math.PI / 2);
+  context.drawImage(bitmap, 0, 0);
+  const originalWidth = bitmap.width;
+  const originalHeight = bitmap.height;
+  bitmap.close();
+  const rotated = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      value => value ? resolve(value) : reject(new Error('تعذر تدوير الصورة.')),
+      'image/png',
+    );
+  });
+  return {blob: rotated, originalWidth, originalHeight};
+}
+
+function numericWordsFromTsv(tsv, orientation, originalWidth, originalHeight) {
+  if (!tsv) return [];
+  const readings = [];
+  const rows = tsv.split(/\r?\n/);
+  for (let index = 1; index < rows.length; index++) {
+    const columns = rows[index].split('\t');
+    if (columns.length < 12) continue;
+    const confidence = Number(columns[10]);
+    const raw = columns.slice(11).join('\t').trim().replace(',', '.');
+    if (confidence < 40 || !/^-?\d+(?:\.\d+)?$/.test(raw)) continue;
+    const left = Number(columns[6]);
+    const top = Number(columns[7]);
+    const width = Number(columns[8]);
+    const height = Number(columns[9]);
+    let x = left + width / 2;
+    let y = top + height / 2;
+    if (orientation === 'rotated') {
+      const rotatedX = x;
+      x = y;
+      y = originalHeight - rotatedX;
+    }
+    readings.push({
+      value: raw,
+      confidence,
+      x: x / originalWidth,
+      y: y / originalHeight,
+    });
+  }
+  return readings;
+}
+
+function mergeExactOcrReadings(readings) {
+  const merged = [];
+  for (const reading of readings) {
+    const duplicate = merged.find(item =>
+      item.value === reading.value &&
+      Math.hypot(item.x - reading.x, item.y - reading.y) < 0.06);
+    if (!duplicate) {
+      merged.push(reading);
+    } else if (reading.confidence > duplicate.confidence) {
+      Object.assign(duplicate, reading);
+    }
+  }
+  return merged.map(reading => ({
+    value: reading.value,
+    confidence: reading.confidence,
+  }));
+}
+
+async function readWrittenDimensions(blob) {
+  const Tesseract = await loadTesseract();
+  const worker = await Tesseract.createWorker('eng', 1, {
+    workerPath:
+      'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+    langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
+  });
+  try {
+    await worker.setParameters({
+      tessedit_char_whitelist: '0123456789.-',
+      tessedit_pageseg_mode: '11',
+    });
+    const originalBitmap = await createImageBitmap(blob);
+    const originalWidth = originalBitmap.width;
+    const originalHeight = originalBitmap.height;
+    originalBitmap.close();
+    const original = await worker.recognize(blob, {}, {tsv: true});
+    const rotatedImage = await rotateImageBlobClockwise(blob);
+    const rotated = await worker.recognize(
+      rotatedImage.blob,
+      {},
+      {tsv: true},
+    );
+    return mergeExactOcrReadings([
+      ...numericWordsFromTsv(
+        original.data.tsv,
+        'original',
+        originalWidth,
+        originalHeight,
+      ),
+      ...numericWordsFromTsv(
+        rotated.data.tsv,
+        'rotated',
+        originalWidth,
+        originalHeight,
+      ),
+    ]);
+  } finally {
+    await worker.terminate();
+  }
+}
+
+window.drawingImageAnalyze2d = async function(bytes, contentType) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const blob = new Blob([data], {
+    type: contentType || 'image/png',
+  });
+  const dimensionReadings = await readWrittenDimensions(blob);
+  let analysis;
+  try {
+    analysis = await analyzeClipboardBlob(blob);
+  } catch (_) {
+    analysis = {drawingScale: 1, profiles: []};
+  }
+  analysis.sourceKind = 'imageOcr';
+  analysis.dimensionReadings = dimensionReadings;
+  return JSON.stringify(analysis);
+};
+
+window.drawingImageAnalyze2dCallback = function(
+  bytes,
+  contentType,
+  onSuccess,
+  onError,
+) {
+  window.drawingImageAnalyze2d(bytes, contentType)
+    .then(result => onSuccess(result))
+    .catch(error => onError(
+      error && error.message ? error.message : String(error),
+    ));
+};
+
 window.clipboardImageAnalyze2d = async function() {
   if (!navigator.clipboard || !navigator.clipboard.read) {
     throw new Error('المتصفح لا يسمح بقراءة الصور من الحافظة.');
