@@ -50,15 +50,24 @@ class ImageDimensionReading {
   const ImageDimensionReading({
     required this.value,
     required this.confidence,
+    required this.x,
+    required this.y,
+    required this.vertical,
   });
 
   final String value;
   final double confidence;
+  final double x;
+  final double y;
+  final bool vertical;
 
   factory ImageDimensionReading.fromJson(Map<String, dynamic> json) {
     return ImageDimensionReading(
       value: json['value'] as String,
       confidence: (json['confidence'] as num).toDouble(),
+      x: (json['x'] as num?)?.toDouble() ?? 0.5,
+      y: (json['y'] as num?)?.toDouble() ?? 0.5,
+      vertical: json['vertical'] as bool? ?? false,
     );
   }
 }
@@ -69,12 +78,16 @@ class PdfProfileAnalysis {
     required this.profiles,
     this.sourceKind = 'pdf',
     this.dimensionReadings = const [],
+    this.sourceImageWidth = 0,
+    this.sourceImageHeight = 0,
   });
 
   final double drawingScale;
   final List<PdfProfileCandidate> profiles;
   final String sourceKind;
   final List<ImageDimensionReading> dimensionReadings;
+  final double sourceImageWidth;
+  final double sourceImageHeight;
 
   bool get isImageSource =>
       sourceKind == 'clipboardImage' || sourceKind == 'imageOcr';
@@ -83,6 +96,10 @@ class PdfProfileAnalysis {
     return PdfProfileAnalysis(
       drawingScale: (json['drawingScale'] as num).toDouble(),
       sourceKind: json['sourceKind'] as String? ?? 'pdf',
+      sourceImageWidth:
+          (json['sourceImageWidth'] as num?)?.toDouble() ?? 0,
+      sourceImageHeight:
+          (json['sourceImageHeight'] as num?)?.toDouble() ?? 0,
       dimensionReadings: (json['dimensionReadings'] as List<dynamic>? ??
               const <dynamic>[])
           .map(
