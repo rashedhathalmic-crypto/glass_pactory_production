@@ -9,3 +9,9 @@ Future<String> convertPdfToDxf({required Uint8List bytes}) {
 Future<PdfProfileAnalysis> analyzePdfProfiles({required Uint8List bytes}) {
   throw UnsupportedError('PDF profile analysis is available in the web app.');
 }
+
+Future<PdfProfileAnalysis> analyzeClipboardDrawing() {
+  throw UnsupportedError(
+    'Clipboard drawing analysis is available in the web app.',
+  );
+}
