@@ -468,3 +468,352 @@ window.pdfAnalyze2dCallback = function(bytes, onSuccess, onError) {
       error && error.message ? error.message : String(error),
     ));
 };
+
+function addRasterSegment(segments, x1, y1, x2, y2) {
+  segments.push({
+    a: `${x1},${y1}`,
+    b: `${x2},${y2}`,
+    pa: [x1 / 2, y1 / 2],
+    pb: [x2 / 2, y2 / 2],
+    used: false,
+  });
+}
+
+function marchingSegments(labels, wanted, width, height) {
+  const segments = [];
+  for (let y = 0; y < height - 1; y++) {
+    for (let x = 0; x < width - 1; x++) {
+      const topLeft = labels[y * width + x] === wanted ? 1 : 0;
+      const topRight = labels[y * width + x + 1] === wanted ? 2 : 0;
+      const bottomRight =
+        labels[(y + 1) * width + x + 1] === wanted ? 4 : 0;
+      const bottomLeft = labels[(y + 1) * width + x] === wanted ? 8 : 0;
+      const state = topLeft | topRight | bottomRight | bottomLeft;
+      if (state === 0 || state === 15) continue;
+
+      const top = [2 * x + 1, 2 * y];
+      const right = [2 * x + 2, 2 * y + 1];
+      const bottom = [2 * x + 1, 2 * y + 2];
+      const left = [2 * x, 2 * y + 1];
+      const add = (a, b) => addRasterSegment(
+        segments,
+        a[0],
+        a[1],
+        b[0],
+        b[1],
+      );
+
+      if (state === 1 || state === 14) add(left, top);
+      else if (state === 2 || state === 13) add(top, right);
+      else if (state === 3 || state === 12) add(left, right);
+      else if (state === 4 || state === 11) add(right, bottom);
+      else if (state === 6 || state === 9) add(top, bottom);
+      else if (state === 7 || state === 8) add(left, bottom);
+      else if (state === 5) {
+        add(left, top);
+        add(right, bottom);
+      } else if (state === 10) {
+        add(top, right);
+        add(bottom, left);
+      }
+    }
+  }
+  return segments;
+}
+
+function stitchRasterSegments(segments) {
+  const links = new Map();
+  const attach = (key, index) => {
+    if (!links.has(key)) links.set(key, []);
+    links.get(key).push(index);
+  };
+  segments.forEach((segment, index) => {
+    attach(segment.a, index);
+    attach(segment.b, index);
+  });
+
+  const paths = [];
+  for (let seed = 0; seed < segments.length; seed++) {
+    if (segments[seed].used) continue;
+    const first = segments[seed];
+    first.used = true;
+    const path = [first.pa, first.pb];
+    const startKey = first.a;
+    let currentKey = first.b;
+
+    for (let guard = 0; guard < segments.length + 2; guard++) {
+      if (currentKey === startKey) break;
+      const nextIndex = (links.get(currentKey) || [])
+        .find(index => !segments[index].used);
+      if (nextIndex === undefined) break;
+      const next = segments[nextIndex];
+      next.used = true;
+      if (next.a === currentKey) {
+        path.push(next.pb);
+        currentKey = next.b;
+      } else {
+        path.push(next.pa);
+        currentKey = next.a;
+      }
+    }
+
+    if (path.length >= 4 && currentKey === startKey) {
+      path.pop();
+      paths.push(path);
+    }
+  }
+  return paths;
+}
+
+function pointLineDistance(point, start, end) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  if (dx === 0 && dy === 0) return distance(point, start);
+  const t = Math.max(0, Math.min(
+    1,
+    ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) /
+      (dx * dx + dy * dy),
+  ));
+  return Math.hypot(
+    point[0] - (start[0] + t * dx),
+    point[1] - (start[1] + t * dy),
+  );
+}
+
+function simplifyOpenRaster(points, epsilon) {
+  if (points.length <= 2) return points.slice();
+  let farthest = 0;
+  let farthestDistance = 0;
+  for (let i = 1; i < points.length - 1; i++) {
+    const value = pointLineDistance(
+      points[i],
+      points[0],
+      points[points.length - 1],
+    );
+    if (value > farthestDistance) {
+      farthest = i;
+      farthestDistance = value;
+    }
+  }
+  if (farthestDistance <= epsilon) {
+    return [points[0], points[points.length - 1]];
+  }
+  const left = simplifyOpenRaster(points.slice(0, farthest + 1), epsilon);
+  const right = simplifyOpenRaster(points.slice(farthest), epsilon);
+  return left.slice(0, -1).concat(right);
+}
+
+function simplifyClosedRaster(points, epsilon) {
+  if (points.length <= 4) return points.slice();
+  let split = 1;
+  let farthest = 0;
+  for (let i = 1; i < points.length; i++) {
+    const value = distance(points[0], points[i]);
+    if (value > farthest) {
+      farthest = value;
+      split = i;
+    }
+  }
+  const first = simplifyOpenRaster(points.slice(0, split + 1), epsilon);
+  const second = simplifyOpenRaster(
+    points.slice(split).concat([points[0]]),
+    epsilon,
+  );
+  const combined = first.slice(0, -1).concat(second.slice(0, -1));
+  return simplify(combined);
+}
+
+function enclosedRasterRegions(mask, width, height) {
+  const size = width * height;
+  const outside = new Uint8Array(size);
+  const queue = new Int32Array(size);
+  let head = 0;
+  let tail = 0;
+  const enqueueOutside = index => {
+    if (!mask[index] && !outside[index]) {
+      outside[index] = 1;
+      queue[tail++] = index;
+    }
+  };
+  for (let x = 0; x < width; x++) {
+    enqueueOutside(x);
+    enqueueOutside((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y++) {
+    enqueueOutside(y * width);
+    enqueueOutside(y * width + width - 1);
+  }
+  while (head < tail) {
+    const index = queue[head++];
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (x > 0) enqueueOutside(index - 1);
+    if (x + 1 < width) enqueueOutside(index + 1);
+    if (y > 0) enqueueOutside(index - width);
+    if (y + 1 < height) enqueueOutside(index + width);
+  }
+
+  const labels = new Int32Array(size);
+  const regions = [];
+  let label = 0;
+  for (let seed = 0; seed < size; seed++) {
+    if (mask[seed] || outside[seed] || labels[seed]) continue;
+    label++;
+    head = 0;
+    tail = 0;
+    queue[tail++] = seed;
+    labels[seed] = label;
+    let area = 0;
+    let minX = width;
+    let maxX = 0;
+    let minY = height;
+    let maxY = 0;
+    while (head < tail) {
+      const index = queue[head++];
+      const x = index % width;
+      const y = Math.floor(index / width);
+      area++;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      const visit = next => {
+        if (!mask[next] && !outside[next] && !labels[next]) {
+          labels[next] = label;
+          queue[tail++] = next;
+        }
+      };
+      if (x > 0) visit(index - 1);
+      if (x + 1 < width) visit(index + 1);
+      if (y > 0) visit(index - width);
+      if (y + 1 < height) visit(index + width);
+    }
+    regions.push({label, area, minX, maxX, minY, maxY});
+  }
+  return {labels, regions};
+}
+
+async function analyzeClipboardBlob(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const maximum = 1600;
+  const scale = Math.min(1, maximum / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d', {willReadFrequently: true});
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  const rgba = context.getImageData(0, 0, width, height).data;
+  const dark = new Uint8Array(width * height);
+  for (let index = 0; index < dark.length; index++) {
+    const offset = index * 4;
+    const luminance =
+      rgba[offset] * 0.299 + rgba[offset + 1] * 0.587 +
+      rgba[offset + 2] * 0.114;
+    if (rgba[offset + 3] > 30 && luminance < 180) dark[index] = 1;
+  }
+
+  // Close one-pixel gaps caused by anti-aliasing when copied from a PDF.
+  const closed = dark.slice();
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const index = y * width + x;
+      if (!dark[index]) continue;
+      closed[index - 1] = 1;
+      closed[index + 1] = 1;
+      closed[index - width] = 1;
+      closed[index + width] = 1;
+    }
+  }
+
+  const result = enclosedRasterRegions(closed, width, height);
+  const minimumArea = Math.max(200, width * height * 0.0008);
+  const candidates = result.regions
+    .filter(region =>
+      region.area >= minimumArea &&
+      region.maxX - region.minX >= 20 &&
+      region.maxY - region.minY >= 20)
+    .sort((a, b) => b.area - a.area)
+    .slice(0, 8)
+    .map(region => {
+      const segments = marchingSegments(
+        result.labels,
+        region.label,
+        width,
+        height,
+      );
+      const paths = stitchRasterSegments(segments)
+        .sort((a, b) => b.length - a.length);
+      if (!paths.length) return null;
+      const raw = paths[0];
+      const diagonal = Math.hypot(
+        region.maxX - region.minX,
+        region.maxY - region.minY,
+      );
+      const points = simplifyClosedRaster(
+        raw,
+        Math.max(1.25, diagonal * 0.003),
+      );
+      if (points.length < 3) return null;
+      const box = bounds(points);
+      return {
+        points: points.map(point => [
+          point[0] - box.minX,
+          box.maxY - point[1],
+        ]),
+        width: box.width,
+        height: box.height,
+        score: region.area,
+      };
+    })
+    .filter(candidate => candidate !== null)
+    .sort((a, b) => b.score - a.score);
+
+  if (!candidates.length) {
+    throw new Error(
+      'لم أجد محيطًا مغلقًا. انسخ الرسمة وحدها بخلفية بيضاء ثم حاول مرة أخرى.',
+    );
+  }
+
+  return {
+    sourceKind: 'clipboardImage',
+    drawingScale: 1,
+    profiles: candidates.map((candidate, index) => ({
+      id: index,
+      suggested: index === 0,
+      inferredClosure: false,
+      vertexCount: candidate.points.length,
+      width: candidate.width,
+      height: candidate.height,
+      points: candidate.points,
+    })),
+  };
+}
+
+window.clipboardImageAnalyze2d = async function() {
+  if (!navigator.clipboard || !navigator.clipboard.read) {
+    throw new Error('المتصفح لا يسمح بقراءة الصور من الحافظة.');
+  }
+  const items = await navigator.clipboard.read();
+  for (const item of items) {
+    const imageType = item.types.find(type => type.startsWith('image/'));
+    if (imageType) {
+      const blob = await item.getType(imageType);
+      return JSON.stringify(await analyzeClipboardBlob(blob));
+    }
+  }
+  throw new Error('لا توجد صورة في الحافظة. انسخ الرسمة أولًا ثم اضغط لصق.');
+};
+
+window.clipboardImageAnalyze2dCallback = function(onSuccess, onError) {
+  window.clipboardImageAnalyze2d()
+    .then(result => onSuccess(result))
+    .catch(error => onError(
+      error && error.message ? error.message : String(error),
+    ));
+};
