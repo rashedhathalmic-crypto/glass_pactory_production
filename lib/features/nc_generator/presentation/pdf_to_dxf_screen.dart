@@ -27,6 +27,7 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
   PdfProfileAnalysis? _analysis;
   int _selectedIndex = 0;
   String? _error;
+  String _outputBaseName = 'PASTED_DRAWING';
   bool _busy = false;
   bool _dimensionsConfirmed = false;
 
@@ -39,8 +40,9 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
   double get _targetWidth {
     final selected = _selected;
     if (selected == null) return 0;
-    return double.tryParse(_actualWidth.text.replaceAll(',', '.')) ??
-        selected.width;
+    final entered = double.tryParse(_actualWidth.text.replaceAll(',', '.'));
+    if (entered != null) return entered;
+    return _analysis?.isClipboardImage ?? false ? 0 : selected.width;
   }
 
   double get _uniformScale {
@@ -81,6 +83,10 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
       _busy = true;
       _error = null;
       _dimensionsConfirmed = false;
+      _outputBaseName = files.first.fileName.replaceAll(
+        RegExp(r'\.pdf$', caseSensitive: false),
+        '',
+      );
     });
 
     try {
@@ -110,13 +116,53 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
     }
   }
 
+  Future<void> _pasteAndAnalyze() async {
+    setState(() {
+      _pdf = null;
+      _analysis = null;
+      _selectedIndex = 0;
+      _busy = true;
+      _error = null;
+      _outputBaseName = 'PASTED_DRAWING';
+      _dimensionsConfirmed = false;
+    });
+
+    try {
+      final analysis = await analyzeClipboardDrawing();
+      if (analysis.profiles.isEmpty) {
+        throw const FormatException(
+          'لم يتم العثور على رسم ثنائي مغلق في الصورة المنسوخة.',
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _analysis = analysis;
+        _selectedIndex = 0;
+        _actualWidth.clear();
+      });
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error
+              .toString()
+              .replaceFirst('FormatException: ', '')
+              .replaceFirst('Error: ', '');
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _selectProfile(int index) {
     final profile = _analysis!.profiles[index];
     setState(() {
       _selectedIndex = index;
       _dimensionsConfirmed = false;
       _error = null;
-      _actualWidth.text = profile.width.toStringAsFixed(3);
+      _actualWidth.text = _analysis!.isClipboardImage
+          ? ''
+          : profile.width.toStringAsFixed(3);
     });
   }
 
@@ -137,13 +183,9 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
         )
         .toList(growable: false);
     final output = _buildDxf(points);
-    final base = _pdf!.fileName.replaceAll(
-      RegExp(r'\.pdf$', caseSensitive: false),
-      '',
-    );
     await downloadBytes(
       bytes: Uint8List.fromList(utf8.encode(output)),
-      fileName: '${base}_PROFILE_ONLY.dxf',
+      fileName: '${_outputBaseName}_PROFILE_ONLY.dxf',
       mimeType: 'application/dxf;charset=utf-8',
     );
   }
@@ -223,8 +265,13 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
             PageHeader(
               title: 'PDF → DXF 2D — Verified Profile',
               subtitle:
-                  'اختر المسقط الثنائي الكامل، راجع الطول والعرض والزوايا، ثم حمّل DXF.',
+                  'الصق الرسمة المحددة أو ارفع PDF، ثم راجع الطول والعرض والزوايا وحمّل DXF.',
               actions: [
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _pasteAndAnalyze,
+                  icon: const Icon(Icons.content_paste),
+                  label: const Text('لصق الرسمة'),
+                ),
                 FilledButton.icon(
                   onPressed: _busy ? null : _pickAndAnalyze,
                   icon: _busy
@@ -240,16 +287,64 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
             ),
             const SizedBox(height: 20),
             AppCard(
+              title: 'لصق الرسمة مباشرة',
+              child: InkWell(
+                onTap: _busy ? null : _pasteAndAnalyze,
+                borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  height: 150,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(
+                      color: const Color(0xFFB8C2D8),
+                      width: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.content_paste_go,
+                        size: 38,
+                        color: AppColors.darkBlue,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _busy
+                            ? 'جاري استخراج الرسم…'
+                            : 'انسخ الرسمة من PDF ثم اضغط هنا للصقها',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'بعد الاستخراج أدخل العرض الحقيقي بالملليمتر.',
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            AppCard(
               title: '1 — تحليل الملف',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(_pdf?.fileName ?? 'لم يتم رفع ملف PDF بعد.'),
+                  Text(
+                    _analysis?.isClipboardImage ?? false
+                        ? 'تم لصق الرسمة من الحافظة.'
+                        : _pdf?.fileName ?? 'لم يتم رفع ملف PDF أو لصق رسمة.',
+                  ),
                   if (_analysis != null) ...[
                     const SizedBox(height: 8),
                     Text(
-                      'مقياس الرسم المكتشف: 1:${_analysis!.drawingScale.toStringAsFixed(_analysis!.drawingScale % 1 == 0 ? 0 : 2)}'
-                      '  •  عدد المساقط المحتملة: ${_analysis!.profiles.length}',
+                      _analysis!.isClipboardImage
+                          ? 'عدد المحيطات المغلقة: ${_analysis!.profiles.length}'
+                          : 'مقياس الرسم المكتشف: 1:${_analysis!.drawingScale.toStringAsFixed(_analysis!.drawingScale % 1 == 0 ? 0 : 2)}'
+                              '  •  عدد المساقط المحتملة: ${_analysis!.profiles.length}',
                       style: const TextStyle(color: AppColors.textSecondary),
                     ),
                   ],
@@ -332,7 +427,8 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
                 const SizedBox(height: 8),
                 Text(
                   '${profile.width.toStringAsFixed(2)} × '
-                  '${profile.height.toStringAsFixed(2)} mm',
+                  '${profile.height.toStringAsFixed(2)} '
+                  '${_analysis!.isClipboardImage ? 'px' : 'mm'}',
                   textDirection: TextDirection.ltr,
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontWeight: FontWeight.w600),
@@ -389,21 +485,24 @@ class _PdfToDxfScreenState extends State<PdfToDxfScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _metric(
-          'العرض المكتشف',
-          '${profile.width.toStringAsFixed(3)} mm',
+          _analysis!.isClipboardImage ? 'عرض الصورة' : 'العرض المكتشف',
+          '${profile.width.toStringAsFixed(3)} '
+              '${_analysis!.isClipboardImage ? 'px' : 'mm'}',
         ),
         _metric(
-          'الارتفاع المكتشف',
-          '${profile.height.toStringAsFixed(3)} mm',
+          _analysis!.isClipboardImage ? 'ارتفاع الصورة' : 'الارتفاع المكتشف',
+          '${profile.height.toStringAsFixed(3)} '
+              '${_analysis!.isClipboardImage ? 'px' : 'mm'}',
         ),
         const SizedBox(height: 12),
         TextField(
           controller: _actualWidth,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(
-            labelText: 'العرض الفعلي حسب المخطط',
+            labelText: 'العرض الفعلي حسب أبعاد المخطط',
             suffixText: 'mm',
-            helperText: 'تعديل العرض يغيّر الحجم بنسبة موحدة ويحفظ الزوايا.',
+            helperText:
+                'أدخل العرض الحقيقي؛ يُحسب الارتفاع بنفس النسبة وتُحفظ الزوايا.',
           ),
         ),
         const SizedBox(height: 12),
