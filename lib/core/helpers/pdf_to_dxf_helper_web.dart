@@ -33,3 +33,19 @@ Future<PdfProfileAnalysis> analyzePdfProfiles({required Uint8List bytes}) {
   ]);
   return completer.future;
 }
+
+Future<PdfProfileAnalysis> analyzeClipboardDrawing() {
+  final completer = Completer<PdfProfileAnalysis>();
+  js.context.callMethod('clipboardImageAnalyze2dCallback', [
+    js.allowInterop((Object result) {
+      try {
+        final json = jsonDecode(result.toString()) as Map<String, dynamic>;
+        completer.complete(PdfProfileAnalysis.fromJson(json));
+      } on Object catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    }),
+    js.allowInterop((Object error) => completer.completeError(error.toString())),
+  ]);
+  return completer.future;
+}
