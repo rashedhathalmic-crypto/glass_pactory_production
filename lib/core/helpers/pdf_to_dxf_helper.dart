@@ -12,3 +12,9 @@ Future<PdfProfileAnalysis> analyzePdfProfiles({required Uint8List bytes}) =>
 
 Future<PdfProfileAnalysis> analyzeClipboardDrawing() =>
     impl.analyzeClipboardDrawing();
+
+Future<PdfProfileAnalysis> analyzeDrawingImage({
+  required Uint8List bytes,
+  required String contentType,
+}) =>
+    impl.analyzeDrawingImage(bytes: bytes, contentType: contentType);
