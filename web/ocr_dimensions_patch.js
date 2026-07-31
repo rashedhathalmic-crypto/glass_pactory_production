@@ -32,7 +32,7 @@ async function prepareHorizontalOcrImages(blob) {
   const bitmap = await createImageBitmap(blob);
   const factor = Math.max(
     1,
-    Math.min(4, 3000 / Math.max(bitmap.width, bitmap.height)),
+    Math.min(4, 3200 / Math.max(bitmap.width, bitmap.height)),
   );
   const width = Math.max(1, Math.round(bitmap.width * factor));
   const height = Math.max(1, Math.round(bitmap.height * factor));
@@ -60,7 +60,7 @@ async function prepareHorizontalOcrImages(blob) {
       image.data[offset] * 0.299 +
       image.data[offset + 1] * 0.587 +
       image.data[offset + 2] * 0.114;
-    const value = luminance < 205 ? 0 : 255;
+    const value = luminance < 215 ? 0 : 255;
     image.data[offset] = value;
     image.data[offset + 1] = value;
     image.data[offset + 2] = value;
@@ -93,7 +93,7 @@ function horizontalNumbersFromTsv(tsv, imageWidth, imageHeight) {
     const columns = rows[index].split('\t');
     if (columns.length < 12) continue;
     const confidence = Number(columns[10]);
-    if (!Number.isFinite(confidence) || confidence < 18) continue;
+    if (!Number.isFinite(confidence) || confidence < 12) continue;
     const text = cleanNumericOcrText(columns.slice(11).join('\t'));
     if (!text || !/\d/.test(text)) continue;
     const left = Number(columns[6]);
@@ -120,33 +120,38 @@ function horizontalNumbersFromTsv(tsv, imageWidth, imageHeight) {
   }
 
   const readings = [];
+  const addGroup = group => {
+    if (!group.length) return;
+    const text = group.map(item => item.text).join('');
+    if (!/^-?\d+(?:\.\d+)?$/.test(text)) return;
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric) || numeric <= 0 || numeric > 1000000) {
+      return;
+    }
+    const left = Math.min(...group.map(item => item.left));
+    const top = Math.min(...group.map(item => item.top));
+    const right = Math.max(...group.map(item => item.left + item.width));
+    const bottom = Math.max(...group.map(item => item.top + item.height));
+    const confidence = group.reduce(
+      (sum, item) => sum + item.confidence,
+      0,
+    ) / group.length;
+    readings.push({
+      value: text,
+      confidence,
+      x: ((left + right) / 2) / imageWidth,
+      y: ((top + bottom) / 2) / imageHeight,
+      vertical: false,
+    });
+  };
+
   for (const lineWords of byLine.values()) {
     lineWords.sort((a, b) => a.left - b.left);
     let group = [];
     const flush = () => {
-      if (!group.length) return;
-      const text = group.map(item => item.text).join('');
-      group = group.splice(0, group.length);
-      if (!/^-?\d+(?:\.\d+)?$/.test(text)) return;
-      const numeric = Number(text);
-      if (!Number.isFinite(numeric) || numeric <= 0 || numeric > 1000000) {
-        return;
-      }
-      const left = Math.min(...group.map(item => item.left));
-      const top = Math.min(...group.map(item => item.top));
-      const right = Math.max(...group.map(item => item.left + item.width));
-      const bottom = Math.max(...group.map(item => item.top + item.height));
-      const confidence = group.reduce(
-        (sum, item) => sum + item.confidence,
-        0,
-      ) / group.length;
-      readings.push({
-        value: text,
-        confidence,
-        x: ((left + right) / 2) / imageWidth,
-        y: ((top + bottom) / 2) / imageHeight,
-        vertical: false,
-      });
+      const captured = group;
+      group = [];
+      addGroup(captured);
     };
 
     for (const word of lineWords) {
@@ -156,7 +161,7 @@ function horizontalNumbersFromTsv(tsv, imageWidth, imageHeight) {
       }
       const previous = group[group.length - 1];
       const gap = word.left - (previous.left + previous.width);
-      const allowedGap = Math.max(previous.height, word.height) * 1.25;
+      const allowedGap = Math.max(previous.height, word.height) * 0.85;
       if (gap <= allowedGap) {
         group.push(word);
       } else {
@@ -178,7 +183,7 @@ function mergeDimensionReadings(readings) {
     }
     const nearby = merged.find(item =>
       item.vertical === reading.vertical &&
-      Math.hypot(item.x - reading.x, item.y - reading.y) < 0.045);
+      Math.hypot(item.x - reading.x, item.y - reading.y) < 0.04);
     if (!nearby) {
       merged.push({...reading});
       continue;
@@ -247,26 +252,22 @@ if (typeof previousDrawingImageAnalyze2d === 'function') {
     const current = Array.isArray(analysis.dimensionReadings)
       ? analysis.dimensionReadings
       : [];
-    const horizontal = current.filter(reading => !reading.vertical);
 
-    // The normal pass is fastest. Only perform the stronger second pass when
-    // it did not find enough horizontal drawing dimensions.
-    if (horizontal.length < 2) {
-      try {
-        const data = bytes instanceof Uint8Array
-          ? bytes
-          : new Uint8Array(bytes);
-        const blob = new Blob([data], {
-          type: contentType || 'image/png',
-        });
-        const recovered = await retryHorizontalDimensions(blob);
-        analysis.dimensionReadings = mergeDimensionReadings([
-          ...current,
-          ...recovered,
-        ]);
-      } catch (error) {
-        console.warn('Horizontal dimension recovery failed:', error);
-      }
+    try {
+      const data = bytes instanceof Uint8Array
+        ? bytes
+        : new Uint8Array(bytes);
+      const blob = new Blob([data], {
+        type: contentType || 'image/png',
+      });
+      const recovered = await retryHorizontalDimensions(blob);
+      analysis.dimensionReadings = mergeDimensionReadings([
+        ...current,
+        ...recovered,
+      ]);
+    } catch (error) {
+      console.warn('Horizontal dimension recovery failed:', error);
+      analysis.dimensionReadings = current;
     }
     return JSON.stringify(analysis);
   };
