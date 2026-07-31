@@ -18,7 +18,7 @@ Object registerFileDrop(void Function(PickedFile file) callback) {
   subscriptions.add(html.document.onDrop.listen((event) async {
     event.preventDefault();
     final files = event.dataTransfer.files;
-    if (files.isEmpty) return;
+    if (files == null || files.isEmpty) return;
     if (!files.first.name.toLowerCase().endsWith('.dxf')) return;
 
     final file = files.first;
