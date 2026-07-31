@@ -24,3 +24,7 @@ Future<PdfProfileAnalysis> analyzeDrawingImage({
     'Drawing image analysis is available in the web app.',
   );
 }
+
+Future<Uint8List> renderPdfFirstPagePng({required Uint8List bytes}) {
+  throw UnsupportedError('PDF page rendering is available in the web app.');
+}
