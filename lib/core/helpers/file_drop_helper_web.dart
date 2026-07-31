@@ -12,21 +12,32 @@ class _Registration {
 
 Object registerFileDrop(void Function(PickedFile file) callback) {
   final subscriptions = <StreamSubscription<html.Event>>[];
-  subscriptions.add(html.document.onDragOver.listen((event) => event.preventDefault()));
+  subscriptions.add(
+    html.document.onDragOver.listen((event) => event.preventDefault()),
+  );
   subscriptions.add(html.document.onDrop.listen((event) async {
     event.preventDefault();
-    final files = event.dataTransfer?.files;
+    final files = event.dataTransfer.files;
     if (files == null || files.isEmpty) return;
     if (!files.first.name.toLowerCase().endsWith('.dxf')) return;
 
     final file = files.first;
     final reader = html.FileReader()..readAsArrayBuffer(file);
     await reader.onLoadEnd.first;
-    callback(PickedFile(fileName: file.name, bytes: reader.result as Uint8List, contentType: file.type));
+    callback(
+      PickedFile(
+        fileName: file.name,
+        bytes: reader.result as Uint8List,
+        contentType: file.type,
+      ),
+    );
   }));
   return _Registration(subscriptions);
 }
 
 void unregisterFileDrop(Object registration) {
-  if (registration is _Registration) for (final subscription in registration.subscriptions) { subscription.cancel(); }
+  if (registration is! _Registration) return;
+  for (final subscription in registration.subscriptions) {
+    subscription.cancel();
+  }
 }
