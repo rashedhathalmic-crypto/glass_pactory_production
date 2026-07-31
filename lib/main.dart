@@ -28,7 +28,7 @@ class NcGeneratorApp extends StatelessWidget {
                 text: 'DXF → NC Grinding',
               ),
               Tab(
-                icon: Icon(Icons.edit_document),
+                icon: Icon(Icons.description_outlined),
                 text: 'PDF / Image → Editable DXF',
               ),
             ],
