@@ -19,6 +19,9 @@ external JSPromise<JSString> _drawingImageAnalyze2d(
   JSString contentType,
 );
 
+@JS('pdfRenderFirstPagePngBase64')
+external JSPromise<JSString> _pdfRenderFirstPagePngBase64(JSUint8Array bytes);
+
 Future<String> convertPdfToDxf({required Uint8List bytes}) async {
   final result = await _pdfToDxf2d(bytes.toJS).toDart;
   return result.toDart;
@@ -45,6 +48,11 @@ Future<PdfProfileAnalysis> analyzeDrawingImage({
     contentType.toJS,
   ).toDart;
   return _decodeAnalysis(result.toDart);
+}
+
+Future<Uint8List> renderPdfFirstPagePng({required Uint8List bytes}) async {
+  final result = await _pdfRenderFirstPagePngBase64(bytes.toJS).toDart;
+  return Uint8List.fromList(base64Decode(result.toDart));
 }
 
 PdfProfileAnalysis _decodeAnalysis(String source) {

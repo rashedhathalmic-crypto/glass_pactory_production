@@ -18,3 +18,6 @@ Future<PdfProfileAnalysis> analyzeDrawingImage({
   required String contentType,
 }) =>
     impl.analyzeDrawingImage(bytes: bytes, contentType: contentType);
+
+Future<Uint8List> renderPdfFirstPagePng({required Uint8List bytes}) =>
+    impl.renderPdfFirstPagePng(bytes: bytes);

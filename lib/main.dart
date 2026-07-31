@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'core/theme/app_theme.dart';
 import 'features/nc_generator/presentation/image_to_dxf_screen.dart';
 import 'features/nc_generator/presentation/nc_generator_screen.dart';
-import 'features/nc_generator/presentation/pdf_to_dxf_screen.dart';
 
 void main() {
   runApp(const NcGeneratorApp());
@@ -19,7 +18,7 @@ class NcGeneratorApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       home: const DefaultTabController(
-        length: 3,
+        length: 2,
         child: Scaffold(
           appBar: TabBar(
             isScrollable: true,
@@ -29,12 +28,8 @@ class NcGeneratorApp extends StatelessWidget {
                 text: 'DXF → NC Grinding',
               ),
               Tab(
-                icon: Icon(Icons.image_outlined),
-                text: 'Image → Editable DXF',
-              ),
-              Tab(
-                icon: Icon(Icons.picture_as_pdf),
-                text: 'PDF → DXF 2D',
+                icon: Icon(Icons.description_outlined),
+                text: 'PDF / Image → Editable DXF',
               ),
             ],
           ),
@@ -42,7 +37,6 @@ class NcGeneratorApp extends StatelessWidget {
             children: [
               NcGeneratorScreen(),
               ImageToDxfScreen(),
-              PdfToDxfScreen(),
             ],
           ),
         ),
