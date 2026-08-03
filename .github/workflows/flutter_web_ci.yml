@@ -32,5 +32,8 @@ jobs:
       - name: Analyze
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
+      - name: Test original DXF chamfer reference
+        run: flutter test test/image_profile_features_reference_test.dart
+
       - name: Build web
         run: flutter build web --release
