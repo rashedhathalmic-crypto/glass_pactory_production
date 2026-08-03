@@ -46,6 +46,8 @@ class PdfProfileCandidate {
   }
 }
 
+enum ImageGeometryValueKind { linear, angle, chamfer }
+
 class ImageDimensionReading {
   const ImageDimensionReading({
     required this.value,
@@ -53,6 +55,7 @@ class ImageDimensionReading {
     required this.x,
     required this.y,
     required this.vertical,
+    this.kind = ImageGeometryValueKind.linear,
   });
 
   final String value;
@@ -60,14 +63,31 @@ class ImageDimensionReading {
   final double x;
   final double y;
   final bool vertical;
+  final ImageGeometryValueKind kind;
+
+  bool get isLinear => kind == ImageGeometryValueKind.linear;
+  bool get isAngle => kind == ImageGeometryValueKind.angle;
+  bool get isChamfer => kind == ImageGeometryValueKind.chamfer;
 
   factory ImageDimensionReading.fromJson(Map<String, dynamic> json) {
+    final rawKind = (json['kind'] ?? json['type'] ?? 'linear')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final kind = switch (rawKind) {
+      'angle' || 'degree' || 'degrees' => ImageGeometryValueKind.angle,
+      'chamfer' || 'c' => ImageGeometryValueKind.chamfer,
+      _ => ImageGeometryValueKind.linear,
+    };
     return ImageDimensionReading(
-      value: json['value'] as String,
+      value: json['value'].toString(),
       confidence: (json['confidence'] as num).toDouble(),
       x: (json['x'] as num?)?.toDouble() ?? 0.5,
       y: (json['y'] as num?)?.toDouble() ?? 0.5,
-      vertical: json['vertical'] as bool? ?? false,
+      vertical: kind == ImageGeometryValueKind.linear
+          ? json['vertical'] as bool? ?? false
+          : false,
+      kind: kind,
     );
   }
 }
