@@ -1,0 +1,31 @@
+name: Diagnose Approval Endpoint
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect endpoint
+        shell: bash
+        run: |
+          set +e
+          url='https://script.google.com/macros/s/AKfycbxwidW-HceCIzOnF8jNx3Ewl5tkKvtjHDRNni75mbGi/exec?action=health'
+          curl --silent --show-error --location --max-time 30 \
+            --dump-header /tmp/headers.txt \
+            --output /tmp/body.txt \
+            --write-out 'HTTP_STATUS=%{http_code}\nFINAL_URL=%{url_effective}\n' \
+            "$url"
+          code=$?
+          echo "CURL_EXIT=$code"
+          echo '--- HEADERS ---'
+          cat /tmp/headers.txt || true
+          echo '--- BODY ---'
+          cat /tmp/body.txt || true
+          echo
+          exit "$code"
