@@ -59,8 +59,9 @@ class NcSimulation {
   }) {
     final points = <NcSimulationPoint>[];
     for (final move in moves) {
-      points.add(move.start);
-      points.add(move.end);
+      points
+        ..add(move.start)
+        ..add(move.end);
     }
 
     if (points.isEmpty) {
@@ -76,25 +77,27 @@ class NcSimulation {
 
     cuttingDistance = moves
         .where((move) => move.kind == NcMoveKind.cutting)
-        .fold(0, (sum, move) => sum + move.planarLength);
+        .fold<double>(0, (sum, move) => sum + move.planarLength);
     rapidDistance = moves
         .where((move) => move.kind == NcMoveKind.rapid)
-        .fold(0, (sum, move) => sum + move.planarLength);
+        .fold<double>(0, (sum, move) => sum + move.planarLength);
 
-    estimatedSeconds = moves.fold(0, (sum, move) {
-      final feed = move.kind == NcMoveKind.rapid
+    estimatedSeconds = moves.fold<double>(0, (sum, move) {
+      final effectiveFeed = move.kind == NcMoveKind.rapid
           ? 6000.0
-          : math.max(move.feed, 1);
-      return sum + move.spatialLength / feed * 60;
+          : math.max(move.feed, 1.0).toDouble();
+      return sum + move.spatialLength / effectiveFeed * 60;
     });
 
     _weights = moves.map((move) {
-      final feed = move.kind == NcMoveKind.rapid
+      final effectiveFeed = move.kind == NcMoveKind.rapid
           ? 6000.0
-          : math.max(move.feed, 1);
-      return math.max(move.spatialLength / feed, 0.000001);
+          : math.max(move.feed, 1.0).toDouble();
+      return math
+          .max(move.spatialLength / effectiveFeed, 0.000001)
+          .toDouble();
     }).toList(growable: false);
-    _totalWeight = _weights.fold(0, (sum, value) => sum + value);
+    _totalWeight = _weights.fold<double>(0, (sum, value) => sum + value);
   }
 
   final List<NcSimulationMove> moves;
@@ -117,12 +120,14 @@ class NcSimulation {
 
   NcSimulationPoint positionAt(double progress) {
     if (moves.isEmpty) return const NcSimulationPoint(0, 0, 0);
-    final target = progress.clamp(0.0, 1.0) * _totalWeight;
+    final target = progress.clamp(0.0, 1.0).toDouble() * _totalWeight;
     var walked = 0.0;
     for (var i = 0; i < moves.length; i++) {
       final next = walked + _weights[i];
       if (target <= next || i == moves.length - 1) {
-        final local = ((target - walked) / _weights[i]).clamp(0.0, 1.0);
+        final local = ((target - walked) / _weights[i])
+            .clamp(0.0, 1.0)
+            .toDouble();
         return NcSimulationPoint.lerp(moves[i].start, moves[i].end, local);
       }
       walked = next;
@@ -130,15 +135,20 @@ class NcSimulation {
     return moves.last.end;
   }
 
-  int lineAt(double progress) {
-    if (moves.isEmpty) return 0;
-    final target = progress.clamp(0.0, 1.0) * _totalWeight;
+  int moveIndexAt(double progress) {
+    if (moves.isEmpty) return -1;
+    final target = progress.clamp(0.0, 1.0).toDouble() * _totalWeight;
     var walked = 0.0;
     for (var i = 0; i < moves.length; i++) {
       walked += _weights[i];
-      if (target <= walked) return moves[i].lineNumber;
+      if (target <= walked) return i;
     }
-    return moves.last.lineNumber;
+    return moves.length - 1;
+  }
+
+  int lineAt(double progress) {
+    final index = moveIndexAt(progress);
+    return index < 0 ? 0 : moves[index].lineNumber;
   }
 }
 
@@ -176,30 +186,34 @@ abstract final class NcSimulationParser {
       }
 
       for (final code in words['G'] ?? const <double>[]) {
-        final rounded = code.round();
-        switch (rounded) {
+        switch (code.round()) {
           case 0:
           case 1:
           case 2:
           case 3:
-            motion = rounded;
+            motion = code.round();
+            break;
           case 20:
             unitScale = 25.4;
+            break;
           case 21:
             unitScale = 1.0;
+            break;
           case 90:
             absolute = true;
+            break;
           case 91:
             absolute = false;
+            break;
         }
       }
 
-      final feedWord = words['F']?.lastOrNull;
+      final feedWord = _last(words, 'F');
       if (feedWord != null && feedWord > 0) feed = feedWord * unitScale;
 
-      final xWord = words['X']?.lastOrNull;
-      final yWord = words['Y']?.lastOrNull;
-      final zWord = words['Z']?.lastOrNull;
+      final xWord = _last(words, 'X');
+      final yWord = _last(words, 'Y');
+      final zWord = _last(words, 'Z');
       if (xWord == null && yWord == null && zWord == null) continue;
 
       final target = NcSimulationPoint(
@@ -221,10 +235,10 @@ abstract final class NcSimulationParser {
       );
 
       if (motion == 2 || motion == 3) {
-        final iWord = words['I']?.lastOrNull;
-        final jWord = words['J']?.lastOrNull;
+        final iWord = _last(words, 'I');
+        final jWord = _last(words, 'J');
         if (iWord == null || jWord == null) {
-          warnings.add('Line ${index + 1}: arc ignored because I/J is missing.');
+          warnings.add('Line ${index + 1}: arc used without I/J; drawn as a line.');
           moves.add(
             NcSimulationMove(
               start: position,
@@ -267,6 +281,11 @@ abstract final class NcSimulationParser {
     );
   }
 
+  static double? _last(Map<String, List<double>> words, String key) {
+    final values = words[key];
+    return values == null || values.isEmpty ? null : values.last;
+  }
+
   static void _addArc({
     required List<NcSimulationMove> moves,
     required NcSimulationPoint start,
@@ -307,7 +326,9 @@ abstract final class NcSimulationParser {
     }
 
     final sweep = endAngle - startAngle;
-    final segmentCount = math.max(12, (sweep.abs() * radius / 3).ceil());
+    final segmentCount = math
+        .max(12, (sweep.abs() * radius / 3).ceil())
+        .toInt();
     var previous = start;
     for (var step = 1; step <= segmentCount; step++) {
       final t = step / segmentCount;
@@ -317,16 +338,17 @@ abstract final class NcSimulationParser {
         centerY + radius * math.sin(angle),
         start.z + (target.z - start.z) * t,
       );
+      final end = step == segmentCount ? target : point;
       moves.add(
         NcSimulationMove(
           start: previous,
-          end: step == segmentCount ? target : point,
+          end: end,
           kind: NcMoveKind.cutting,
           lineNumber: lineNumber,
           feed: feed,
         ),
       );
-      previous = point;
+      previous = end;
     }
   }
 }
