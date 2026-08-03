@@ -93,7 +93,7 @@ class ImageProfileFeatures {
       final point = profile.points[index];
       final normalizedX = point.x / safeWidth;
       final normalizedY = 1 - point.y / safeHeight;
-      final distance = math.hypot(
+      final distance = _hypot(
         normalizedX - reading.x,
         normalizedY - reading.y,
       );
@@ -116,7 +116,7 @@ class ImageProfileFeatures {
     final next = points[(index + 1) % points.length];
     final chordX = next.x - previous.x;
     final chordY = next.y - previous.y;
-    final chord = math.hypot(chordX, chordY);
+    final chord = _hypot(chordX, chordY);
     if (chord <= 1e-8) return;
 
     final unitX = chordX / chord;
@@ -138,7 +138,7 @@ class ImageProfileFeatures {
       final ay = previous.y - by;
       final cx = next.x - bx;
       final cy = next.y - by;
-      final denominator = math.hypot(ax, ay) * math.hypot(cx, cy);
+      final denominator = _hypot(ax, ay) * _hypot(cx, cy);
       if (denominator <= 1e-12) return math.pi;
       final cosine = ((ax * cx + ay * cy) / denominator)
           .clamp(-1.0, 1.0)
@@ -195,6 +195,8 @@ class ImageProfileFeatures {
   }
 
   static double _distance(PdfProfilePoint first, PdfProfilePoint second) {
-    return math.hypot(second.x - first.x, second.y - first.y);
+    return _hypot(second.x - first.x, second.y - first.y);
   }
+
+  static double _hypot(double x, double y) => math.sqrt(x * x + y * y);
 }
