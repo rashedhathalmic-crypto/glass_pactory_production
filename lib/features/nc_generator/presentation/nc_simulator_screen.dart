@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -96,8 +97,9 @@ class _NcSimulatorScreenState extends State<NcSimulatorScreen>
           'No G00/G01/G02/G03 movement was found in the NC program.',
         );
       }
-      _animation.stop();
-      _animation.value = 0;
+      _animation
+        ..stop()
+        ..value = 0;
       _updateDuration(simulation);
       setState(() {
         _simulation = simulation;
@@ -114,13 +116,14 @@ class _NcSimulatorScreenState extends State<NcSimulatorScreen>
   }
 
   void _updateDuration(NcSimulation simulation) {
-    final seconds = (simulation.estimatedSeconds / _speed).clamp(3.0, 180.0);
+    final seconds = (simulation.estimatedSeconds / _speed)
+        .clamp(3.0, 180.0)
+        .toDouble();
     _animation.duration = Duration(milliseconds: (seconds * 1000).round());
   }
 
   void _togglePlay() {
-    final simulation = _simulation;
-    if (simulation == null) return;
+    if (_simulation == null) return;
     if (_animation.isAnimating) {
       _animation.stop();
     } else {
@@ -144,11 +147,10 @@ class _NcSimulatorScreenState extends State<NcSimulatorScreen>
     _animation.stop();
     setState(() => _speed = value);
     final simulation = _simulation;
-    if (simulation != null) {
-      _updateDuration(simulation);
-      _animation.value = progress;
-      if (wasAnimating) _animation.forward();
-    }
+    if (simulation == null) return;
+    _updateDuration(simulation);
+    _animation.value = progress;
+    if (wasAnimating) _animation.forward();
   }
 
   @override
@@ -310,7 +312,7 @@ class _NcSimulatorScreenState extends State<NcSimulatorScreen>
         ),
         const SizedBox(height: 16),
         if (simulation != null) ...[
-          _controls(simulation),
+          _controls(),
           const SizedBox(height: 16),
           _statistics(simulation),
         ],
@@ -341,7 +343,7 @@ class _NcSimulatorScreenState extends State<NcSimulatorScreen>
     );
   }
 
-  Widget _controls(NcSimulation simulation) {
+  Widget _controls() {
     return AppCard(
       title: 'Playback',
       child: Column(
@@ -563,9 +565,9 @@ class _NcSimulationPainter extends CustomPainter {
     }
 
     final currentPosition = simulation.positionAt(progress);
-    final currentLine = simulation.lineAt(progress);
-    for (final move in simulation.moves) {
-      if (move.lineNumber > currentLine) break;
+    final currentMoveIndex = simulation.moveIndexAt(progress);
+    for (var i = 0; i < currentMoveIndex; i++) {
+      final move = simulation.moves[i];
       if (move.planarLength < .000001) continue;
       canvas.drawLine(map(move.start), map(move.end), completedPaint);
     }
