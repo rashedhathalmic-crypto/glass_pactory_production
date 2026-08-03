@@ -168,7 +168,7 @@ class _NcSimulatorScreenState extends State<NcSimulatorScreen>
                 PageHeader(
                   title: 'NC Toolpath Simulator',
                   subtitle:
-                      'Verify G00/G01/G02/G03 motion, passes, tool position and estimated machining time before running the machine.',
+                      'Verify the final part size, program time and machine coordinates before running the machine.',
                   actions: [
                     OutlinedButton.icon(
                       onPressed: _pickNc,
@@ -314,7 +314,7 @@ class _NcSimulatorScreenState extends State<NcSimulatorScreen>
         if (simulation != null) ...[
           _controls(),
           const SizedBox(height: 16),
-          _statistics(simulation),
+          _resultSummary(simulation),
         ],
       ],
     );
@@ -410,74 +410,136 @@ class _NcSimulatorScreenState extends State<NcSimulatorScreen>
     );
   }
 
-  Widget _statistics(NcSimulation simulation) {
+  Widget _resultSummary(NcSimulation simulation) {
+    final bounds = _finalCuttingBounds(simulation);
     final duration = Duration(seconds: simulation.estimatedSeconds.round());
-    final stats = <(String, String)>[
-      ('Program lines', '${simulation.sourceLineCount}'),
-      ('Motion blocks', '${simulation.moves.length}'),
-      ('Grinding distance', '${_n(simulation.cuttingDistance)} mm'),
-      ('Rapid distance', '${_n(simulation.rapidDistance)} mm'),
-      ('Part size X', '${_n(simulation.maxX - simulation.minX)} mm'),
-      ('Part size Y', '${_n(simulation.maxY - simulation.minY)} mm'),
-      ('Minimum Z', '${_n(simulation.minZ)} mm'),
-      ('Estimated time', _duration(duration)),
-    ];
+    final end = simulation.moves.last.end;
 
-    return AppCard(
-      title: 'Simulation summary',
-      child: Column(
-        children: [
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 220,
-              mainAxisExtent: 68,
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-            ),
-            itemCount: stats.length,
-            itemBuilder: (context, index) {
-              final stat = stats[index];
-              return Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.offWhite,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      stat.$1,
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      stat.$2,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                ),
-              );
-            },
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, _) {
+        final current = simulation.positionAt(_animation.value);
+        final stats = <(String, String, IconData)>[
+          (
+            'Final part dimensions',
+            'X ${_n(bounds.width)} × Y ${_n(bounds.height)} mm',
+            Icons.straighten,
           ),
-          if (simulation.warnings.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                simulation.warnings.join('\n'),
-                style: const TextStyle(color: AppColors.error, fontSize: 12),
+          (
+            'Estimated program time',
+            _duration(duration),
+            Icons.timer_outlined,
+          ),
+          (
+            'Current coordinates',
+            'X ${_n(current.x)}   Y ${_n(current.y)}   Z ${_n(current.z)} mm',
+            Icons.my_location,
+          ),
+          (
+            'Program end coordinates',
+            'X ${_n(end.x)}   Y ${_n(end.y)}   Z ${_n(end.z)} mm',
+            Icons.flag_outlined,
+          ),
+        ];
+
+        return AppCard(
+          title: 'Final result after NC program',
+          child: Column(
+            children: [
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 330,
+                  mainAxisExtent: 92,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                ),
+                itemCount: stats.length,
+                itemBuilder: (context, index) {
+                  final stat = stats[index];
+                  return Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.offWhite,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(stat.$3, color: AppColors.darkBlue),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                stat.$1,
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                stat.$2,
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
-            ),
-          ],
-        ],
-      ),
+              if (simulation.warnings.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    simulation.warnings.join('\n'),
+                    style: const TextStyle(color: AppColors.error, fontSize: 12),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
+  }
+
+  _NcBounds _finalCuttingBounds(NcSimulation simulation) {
+    final groups = <List<NcSimulationPoint>>[];
+    var current = <NcSimulationPoint>[];
+
+    void finishGroup() {
+      if (current.length >= 2) groups.add(current);
+      current = <NcSimulationPoint>[];
+    }
+
+    for (final move in simulation.moves) {
+      if (move.kind == NcMoveKind.cutting && move.planarLength > .000001) {
+        if (current.isEmpty) current.add(move.start);
+        current.add(move.end);
+      } else if (move.kind == NcMoveKind.rapid && current.isNotEmpty) {
+        finishGroup();
+      }
+    }
+    finishGroup();
+
+    final points = groups.isNotEmpty
+        ? groups.last
+        : simulation.moves
+            .expand((move) => <NcSimulationPoint>[move.start, move.end])
+            .toList(growable: false);
+    return _NcBounds.fromPoints(points);
   }
 
   String _n(double value) {
@@ -493,6 +555,35 @@ class _NcSimulatorScreenState extends State<NcSimulatorScreen>
     if (minutes > 0) return '${minutes}m ${seconds}s';
     return '${seconds}s';
   }
+}
+
+class _NcBounds {
+  const _NcBounds({
+    required this.minX,
+    required this.maxX,
+    required this.minY,
+    required this.maxY,
+  });
+
+  factory _NcBounds.fromPoints(List<NcSimulationPoint> points) {
+    if (points.isEmpty) {
+      return const _NcBounds(minX: 0, maxX: 0, minY: 0, maxY: 0);
+    }
+    return _NcBounds(
+      minX: points.map((point) => point.x).reduce(math.min),
+      maxX: points.map((point) => point.x).reduce(math.max),
+      minY: points.map((point) => point.y).reduce(math.min),
+      maxY: points.map((point) => point.y).reduce(math.max),
+    );
+  }
+
+  final double minX;
+  final double maxX;
+  final double minY;
+  final double maxY;
+
+  double get width => maxX - minX;
+  double get height => maxY - minY;
 }
 
 class _NcSimulationPainter extends CustomPainter {
