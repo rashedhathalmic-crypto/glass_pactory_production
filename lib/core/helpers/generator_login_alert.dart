@@ -12,6 +12,10 @@ void showGeneratorLoginNotification({
   impl.showGeneratorLoginNotification(title: title, body: body);
 }
 
+Future<Map<String, dynamic>> checkGeneratorApprovalService() {
+  return impl.checkGeneratorApprovalService();
+}
+
 Future<Map<String, dynamic>> createGeneratorAccessRequest({
   required String requesterName,
   required String idToken,
