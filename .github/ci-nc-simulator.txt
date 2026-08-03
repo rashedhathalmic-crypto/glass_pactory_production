@@ -1,1 +1,2 @@
 Temporary CI verification marker for the NC simulator integration.
+Verification rerun after simulator import fix.
