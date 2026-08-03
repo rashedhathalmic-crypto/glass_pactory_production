@@ -93,6 +93,9 @@ Future<Map<String, dynamic>> createGeneratorAccessRequest({
   required String idToken,
   required String tool,
 }) async {
+  final service = await checkGeneratorApprovalService();
+  if (service['status'] != 'healthy') return service;
+
   final body = html.document.body;
   if (body == null) {
     return {
