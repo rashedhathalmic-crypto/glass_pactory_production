@@ -1,0 +1,1 @@
+Validate mandatory login approval, browser notifications, and the Apps Script health endpoint.
