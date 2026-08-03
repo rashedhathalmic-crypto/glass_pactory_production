@@ -33,29 +33,75 @@ class NcGeneratorApp extends StatelessWidget {
   }
 }
 
-class _GeneratorLoginGate extends StatelessWidget {
+class _GeneratorLoginGate extends StatefulWidget {
   const _GeneratorLoginGate();
 
   @override
+  State<_GeneratorLoginGate> createState() => _GeneratorLoginGateState();
+}
+
+class _GeneratorLoginGateState extends State<_GeneratorLoginGate> {
+  bool _checkingSession = true;
+  bool _approved = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_restoreSession());
+  }
+
+  Future<void> _restoreSession() async {
+    final user = await FirebaseAuth.instance.authStateChanges().first;
+    final approvedUntil = readGeneratorApprovalExpiry();
+    final approved = user != null &&
+        approvedUntil != null &&
+        approvedUntil.isAfter(DateTime.now());
+
+    if (!approved && user != null) {
+      clearGeneratorApproval();
+      await FirebaseAuth.instance.signOut();
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _approved = approved;
+      _checkingSession = false;
+    });
+  }
+
+  void _handleApproved() {
+    if (!mounted) return;
+    setState(() => _approved = true);
+  }
+
+  Future<void> _handleSignOut() async {
+    clearGeneratorApproval();
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    setState(() => _approved = false);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-        return snapshot.data == null
-            ? const _GeneratorLoginScreen()
-            : const _GeneratorHome();
-      },
-    );
+    if (_checkingSession) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (_approved && user != null) {
+      return _GeneratorHome(onSignOut: _handleSignOut);
+    }
+
+    return _GeneratorLoginScreen(onApproved: _handleApproved);
   }
 }
 
 class _GeneratorLoginScreen extends StatefulWidget {
-  const _GeneratorLoginScreen();
+  const _GeneratorLoginScreen({required this.onApproved});
+
+  final VoidCallback onApproved;
 
   @override
   State<_GeneratorLoginScreen> createState() =>
@@ -69,54 +115,190 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+
   bool _isLoading = false;
+  bool _waitingForApproval = false;
   bool _obscurePassword = true;
-  String? _errorMessage;
+  bool _cancelPolling = false;
+  String? _statusMessage;
+  bool _statusIsError = false;
 
   @override
   void dispose() {
+    _cancelPolling = true;
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
+  int? _asInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  Future<void> _setFailure(String message) async {
+    clearGeneratorApproval();
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      _waitingForApproval = false;
+      _statusMessage = message;
+      _statusIsError = true;
+    });
+  }
+
+  Future<void> _cancelRequest() async {
+    _cancelPolling = true;
+    await _setFailure('تم إلغاء طلب الدخول.');
+  }
+
   Future<void> _signIn() async {
+    if (_isLoading || _waitingForApproval) return;
     if (!_formKey.currentState!.validate()) return;
 
-    // Start the browser permission request directly from the sign-in click.
-    // Browsers may reject notification prompts that are not user initiated.
+    _cancelPolling = false;
+
+    // Browser permission prompts must start from the user's click.
     final notificationPermission = requestGeneratorNotificationPermission();
 
     setState(() {
       _isLoading = true;
-      _errorMessage = null;
+      _statusMessage = 'جارٍ التحقق من بيانات الدخول...';
+      _statusIsError = false;
     });
+
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final credential =
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _accountEmail,
         password: _passwordController.text,
       );
+      final idToken = await credential.user?.getIdToken(true);
+      if (idToken == null || idToken.isEmpty) {
+        await _setFailure('تعذر إنشاء رمز دخول آمن. حاول مرة أخرى.');
+        return;
+      }
 
-      if (await notificationPermission) {
-        showGeneratorLoginNotification();
-      }
-      unawaited(
-        sendGeneratorLoginEmail(
-          username: _allowedUsername,
-          accountEmail: _accountEmail,
-        ),
+      final request = await createGeneratorAccessRequest(
+        requesterName: _allowedUsername,
+        idToken: idToken,
+        tool: 'المحوّل والمولّد والمحاكي',
       );
-    } on FirebaseAuthException {
-      if (mounted) {
-        setState(() => _errorMessage = 'Invalid username or password');
+
+      if (request['status'] != 'submitted') {
+        await _setFailure(
+          request['message']?.toString() ??
+              'تعذر إرسال طلب الموافقة إلى البريد.',
+        );
+        return;
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+
+      final requestId = request['requestId']?.toString() ?? '';
+      final pollToken = request['pollToken']?.toString() ?? '';
+      final expiresAtMillis = _asInt(request['expiresAt']) ??
+          DateTime.now()
+              .add(const Duration(minutes: 10))
+              .millisecondsSinceEpoch;
+      final expiresAt =
+          DateTime.fromMillisecondsSinceEpoch(expiresAtMillis);
+      final requestStartedAt = DateTime.now();
+
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _waitingForApproval = true;
+        _statusMessage =
+            'تم إرسال طلب الموافقة إلى البريد. بانتظار القبول...';
+        _statusIsError = false;
+      });
+
+      while (mounted &&
+          !_cancelPolling &&
+          DateTime.now().isBefore(expiresAt)) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+        if (_cancelPolling || !mounted) return;
+
+        final result = await pollGeneratorAccessRequest(
+          requestId: requestId,
+          pollToken: pollToken,
+        );
+        final status = result['status']?.toString() ?? 'error';
+
+        if (status == 'pending') continue;
+
+        // The first poll can arrive before Apps Script finishes writing.
+        if (status == 'invalid' &&
+            DateTime.now().difference(requestStartedAt) <
+                const Duration(seconds: 20)) {
+          continue;
+        }
+
+        if (status == 'approved') {
+          final approvedUntilMillis = _asInt(result['approvedUntil']) ??
+              DateTime.now()
+                  .add(const Duration(hours: 4))
+                  .millisecondsSinceEpoch;
+          final approvedUntil =
+              DateTime.fromMillisecondsSinceEpoch(approvedUntilMillis);
+          saveGeneratorApprovalExpiry(approvedUntil);
+
+          if (await notificationPermission) {
+            showGeneratorLoginNotification(
+              title: 'تم قبول الدخول',
+              body:
+                  'تم السماح بالدخول إلى Glass CNC Tools لمدة 4 ساعات.',
+            );
+          }
+
+          if (!mounted) return;
+          widget.onApproved();
+          return;
+        }
+
+        if (status == 'rejected') {
+          await _setFailure('تم رفض طلب الدخول من البريد.');
+          return;
+        }
+        if (status == 'expired') {
+          await _setFailure(
+            'انتهت مهلة الموافقة. سجّل الدخول وأرسل طلبًا جديدًا.',
+          );
+          return;
+        }
+        if (status == 'error') {
+          await _setFailure(
+            result['message']?.toString() ??
+                'تعذر إرسال بريد الموافقة. تحقق من خدمة البريد ثم أعد المحاولة.',
+          );
+          return;
+        }
+
+        await _setFailure(
+          'لم تصل حالة موافقة صحيحة. أعد المحاولة بعد التأكد من نشر خدمة الموافقة.',
+        );
+        return;
+      }
+
+      if (!_cancelPolling) {
+        await _setFailure(
+          'انتهت مهلة طلب الدخول دون موافقة. أرسل طلبًا جديدًا.',
+        );
+      }
+    } on FirebaseAuthException {
+      await _setFailure('اسم المستخدم أو كلمة المرور غير صحيحة.');
+    } on Object {
+      await _setFailure(
+        'تعذر إكمال طلب الدخول. تحقق من الاتصال وأعد المحاولة.',
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final fieldsEnabled = !_isLoading && !_waitingForApproval;
+
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
@@ -131,9 +313,10 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                   Text(
                     'Glass CNC Tools',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                    style:
+                        Theme.of(context).textTheme.headlineMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -144,6 +327,7 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                   const SizedBox(height: 32),
                   TextFormField(
                     controller: _usernameController,
+                    enabled: fieldsEnabled,
                     textCapitalization: TextCapitalization.characters,
                     autocorrect: false,
                     enableSuggestions: false,
@@ -165,6 +349,7 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                   const SizedBox(height: 16),
                   TextFormField(
                     controller: _passwordController,
+                    enabled: fieldsEnabled,
                     obscureText: _obscurePassword,
                     textInputAction: TextInputAction.done,
                     onFieldSubmitted: (_) => _signIn(),
@@ -172,9 +357,12 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                       labelText: 'Password',
                       prefixIcon: const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
-                        onPressed: () => setState(
-                          () => _obscurePassword = !_obscurePassword,
-                        ),
+                        onPressed: fieldsEnabled
+                            ? () => setState(
+                                  () => _obscurePassword =
+                                      !_obscurePassword,
+                                )
+                            : null,
                         icon: Icon(
                           _obscurePassword
                               ? Icons.visibility_outlined
@@ -186,26 +374,74 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                         ? 'Password is required'
                         : null,
                   ),
-                  if (_errorMessage != null) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      _errorMessage!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.red),
+                  if (_statusMessage != null) ...[
+                    const SizedBox(height: 18),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (_waitingForApproval)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 2),
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              )
+                            else
+                              Icon(
+                                _statusIsError
+                                    ? Icons.error_outline
+                                    : Icons.info_outline,
+                                color: _statusIsError ? Colors.red : null,
+                              ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                _statusMessage!,
+                                style: TextStyle(
+                                  color:
+                                      _statusIsError ? Colors.red : null,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ],
                   const SizedBox(height: 24),
                   FilledButton.icon(
-                    onPressed: _isLoading ? null : _signIn,
+                    onPressed: fieldsEnabled ? _signIn : null,
                     icon: _isLoading
                         ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.login),
-                    label: Text(_isLoading ? 'Signing in...' : 'Sign In'),
+                    label: Text(
+                      _isLoading
+                          ? 'جارٍ تسجيل الدخول...'
+                          : _waitingForApproval
+                              ? 'بانتظار الموافقة...'
+                              : 'تسجيل الدخول',
+                    ),
                   ),
+                  if (_waitingForApproval) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _cancelRequest,
+                      icon: const Icon(Icons.close),
+                      label: const Text('إلغاء الطلب'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -217,7 +453,9 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
 }
 
 class _GeneratorHome extends StatefulWidget {
-  const _GeneratorHome();
+  const _GeneratorHome({required this.onSignOut});
+
+  final Future<void> Function() onSignOut;
 
   @override
   State<_GeneratorHome> createState() => _GeneratorHomeState();
@@ -234,14 +472,19 @@ class _GeneratorHomeState extends State<_GeneratorHome> {
 
   Future<void> _enableNotifications() async {
     final granted = await requestGeneratorNotificationPermission();
-    if (granted) showGeneratorLoginNotification();
+    if (granted) {
+      showGeneratorLoginNotification(
+        title: 'تم تفعيل الإشعارات',
+        body: 'ستظهر إشعارات Glass CNC Tools في هذا المتصفح.',
+      );
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           granted
-              ? 'Browser notifications are enabled.'
-              : 'Notification permission was not granted by the browser.',
+              ? 'تم تفعيل إشعارات المتصفح.'
+              : 'لم يمنح المتصفح إذن الإشعارات.',
         ),
       ),
     );
@@ -257,12 +500,12 @@ class _GeneratorHomeState extends State<_GeneratorHome> {
           actions: [
             IconButton(
               onPressed: _enableNotifications,
-              tooltip: 'Enable notifications',
+              tooltip: 'تفعيل الإشعارات',
               icon: const Icon(Icons.notifications_active_outlined),
             ),
             IconButton(
-              onPressed: FirebaseAuth.instance.signOut,
-              tooltip: 'Sign out',
+              onPressed: widget.onSignOut,
+              tooltip: 'تسجيل الخروج',
               icon: const Icon(Icons.logout),
             ),
           ],
