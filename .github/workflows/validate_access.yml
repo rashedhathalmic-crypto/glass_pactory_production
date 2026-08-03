@@ -29,10 +29,22 @@ jobs:
       - name: Build web
         run: flutter build web --release --base-href "/glass_pactory_production/"
 
-      - name: Verify approval service
+      - name: Diagnose approval service
         shell: bash
         run: |
-          set -euo pipefail
-          response="$(curl --fail --silent --show-error --location --max-time 20 'https://script.google.com/macros/s/AKfycbxwidW-HceCIzOnF8jNx3Ewl5tkKvtjHDRNni75mbGi/exec?action=health')"
-          echo "$response"
-          echo "$response" | grep -q '"ok":true'
+          set +e
+          url='https://script.google.com/macros/s/AKfycbxwidW-HceCIzOnF8jNx3Ewl5tkKvtjHDRNni75mbGi/exec?action=health'
+          curl --silent --show-error --location --max-time 30 \
+            --dump-header /tmp/headers.txt \
+            --output /tmp/body.txt \
+            --write-out 'HTTP_STATUS=%{http_code}\nFINAL_URL=%{url_effective}\n' \
+            "$url"
+          curl_code=$?
+          echo "CURL_EXIT=$curl_code"
+          echo '--- HEADERS ---'
+          cat /tmp/headers.txt || true
+          echo '--- BODY ---'
+          cat /tmp/body.txt || true
+          echo
+          if [ "$curl_code" -ne 0 ]; then exit "$curl_code"; fi
+          grep -q '"ok":true' /tmp/body.txt
