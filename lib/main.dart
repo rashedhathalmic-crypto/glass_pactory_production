@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
+import 'core/helpers/generator_login_alert.dart';
 import 'core/theme/app_theme.dart';
 import 'features/nc_generator/presentation/image_to_dxf_screen.dart';
 import 'features/nc_generator/presentation/nc_generator_screen.dart';
+import 'features/nc_generator/presentation/nc_simulator_screen.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
@@ -78,6 +82,11 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
 
   Future<void> _signIn() async {
     if (!_formKey.currentState!.validate()) return;
+
+    // Start the browser permission request directly from the sign-in click.
+    // Browsers may reject notification prompts that are not user initiated.
+    final notificationPermission = requestGeneratorNotificationPermission();
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -86,6 +95,16 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
       await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _accountEmail,
         password: _passwordController.text,
+      );
+
+      if (await notificationPermission) {
+        showGeneratorLoginNotification();
+      }
+      unawaited(
+        sendGeneratorLoginEmail(
+          username: _allowedUsername,
+          accountEmail: _accountEmail,
+        ),
       );
     } on FirebaseAuthException {
       if (mounted) {
@@ -115,6 +134,12 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'NC generator, drawing converter and toolpath simulator',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 32),
                   TextFormField(
@@ -170,15 +195,16 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                     ),
                   ],
                   const SizedBox(height: 24),
-                  FilledButton(
+                  FilledButton.icon(
                     onPressed: _isLoading ? null : _signIn,
-                    child: _isLoading
+                    icon: _isLoading
                         ? const SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Sign In'),
+                        : const Icon(Icons.login),
+                    label: Text(_isLoading ? 'Signing in...' : 'Sign In'),
                   ),
                 ],
               ),
@@ -190,35 +216,86 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
   }
 }
 
-class _GeneratorHome extends StatelessWidget {
+class _GeneratorHome extends StatefulWidget {
   const _GeneratorHome();
 
   @override
+  State<_GeneratorHome> createState() => _GeneratorHomeState();
+}
+
+class _GeneratorHomeState extends State<_GeneratorHome> {
+  final ValueNotifier<String> _generatedProgram = ValueNotifier('');
+
+  @override
+  void dispose() {
+    _generatedProgram.dispose();
+    super.dispose();
+  }
+
+  Future<void> _enableNotifications() async {
+    final granted = await requestGeneratorNotificationPermission();
+    if (granted) showGeneratorLoginNotification();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          granted
+              ? 'Browser notifications are enabled.'
+              : 'Notification permission was not granted by the browser.',
+        ),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const DefaultTabController(
-      length: 2,
+    return DefaultTabController(
+      length: 3,
       child: Scaffold(
-        appBar: TabBar(
-          isScrollable: true,
-          tabs: [
-            Tab(
-              icon: Icon(Icons.precision_manufacturing),
-              text: 'DXF â†’ NC Grinding',
+        appBar: AppBar(
+          title: const Text('Glass CNC Tools'),
+          actions: [
+            IconButton(
+              onPressed: _enableNotifications,
+              tooltip: 'Enable notifications',
+              icon: const Icon(Icons.notifications_active_outlined),
             ),
-            Tab(
-              icon: Icon(Icons.description_outlined),
-              text: 'PDF / Image â†’ Editable DXF',
+            IconButton(
+              onPressed: FirebaseAuth.instance.signOut,
+              tooltip: 'Sign out',
+              icon: const Icon(Icons.logout),
             ),
           ],
+          bottom: const TabBar(
+            isScrollable: true,
+            tabs: [
+              Tab(
+                icon: Icon(Icons.precision_manufacturing),
+                text: 'DXF → NC Grinding',
+              ),
+              Tab(
+                icon: Icon(Icons.description_outlined),
+                text: 'PDF / Image → Editable DXF',
+              ),
+              Tab(
+                icon: Icon(Icons.animation),
+                text: 'NC Simulator',
+              ),
+            ],
+          ),
         ),
         body: TabBarView(
           children: [
-            NcGeneratorScreen(),
-            ImageToDxfScreen(),
+            NcGeneratorScreen(
+              onProgramGenerated: (program) {
+                _generatedProgram.value = program;
+              },
+            ),
+            const ImageToDxfScreen(),
+            NcSimulatorScreen(generatedProgram: _generatedProgram),
           ],
         ),
       ),
     );
   }
 }
-
