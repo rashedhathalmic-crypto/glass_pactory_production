@@ -5,9 +5,13 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:math';
 
-const _approvalServiceUrl =
+const _defaultApprovalServiceUrl =
     'https://script.google.com/macros/s/'
     'AKfycbxwidW-HceCIzOnF8jNx3Ewl5tkKvtjHDRNni75mbGi/exec';
+const _approvalServiceUrl = String.fromEnvironment(
+  'ACCESS_APPROVAL_URL',
+  defaultValue: _defaultApprovalServiceUrl,
+);
 const _approvalUntilKey = 'glass_cnc_access_approved_until';
 
 Future<bool> requestGeneratorNotificationPermission() async {
@@ -55,6 +59,33 @@ void _addHiddenField(
     ..name = name
     ..value = value;
   form.children.add(input);
+}
+
+Future<Map<String, dynamic>> checkGeneratorApprovalService() async {
+  if (!_approvalServiceUrl.startsWith('https://') ||
+      !_approvalServiceUrl.endsWith('/exec')) {
+    return {
+      'status': 'error',
+      'message':
+          'رابط خدمة الموافقة غير صحيح. يجب أن يكون رابط نشر Google وينتهي بـ /exec.',
+    };
+  }
+
+  final result = await pollGeneratorAccessRequest(
+    requestId:
+        'health_${DateTime.now().millisecondsSinceEpoch}_${_randomHex(8)}',
+    pollToken: _randomHex(32),
+  );
+  final status = result['status']?.toString() ?? 'error';
+  if (status == 'invalid') {
+    return {'status': 'healthy'};
+  }
+
+  return {
+    'status': 'error',
+    'message': result['message']?.toString() ??
+        'خدمة الموافقة غير منشورة أو أن رابط /exec غير صالح.',
+  };
 }
 
 Future<Map<String, dynamic>> createGeneratorAccessRequest({
@@ -177,7 +208,11 @@ Future<Map<String, dynamic>> pollGeneratorAccessRequest({
     await loaded.future.timeout(const Duration(seconds: 12));
     final raw = html.window.localStorage[storageKey];
     if (raw == null || raw.isEmpty) {
-      return {'status': 'invalid'};
+      return {
+        'status': 'error',
+        'message':
+            'خدمة الموافقة غير منشورة أو أن رابط Google /exec غير صالح.',
+      };
     }
 
     final decoded = jsonDecode(raw);
@@ -202,7 +237,8 @@ Future<Map<String, dynamic>> pollGeneratorAccessRequest({
   } on Object {
     return {
       'status': 'error',
-      'message': 'تعذر الاتصال بخدمة الموافقة.',
+      'message':
+          'تعذر الاتصال بخدمة الموافقة. تأكد من نشر Google Script كرابط /exec.',
     };
   } finally {
     await loadSubscription.cancel();
