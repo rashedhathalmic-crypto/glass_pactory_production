@@ -5,6 +5,13 @@ void showGeneratorLoginNotification({
   required String body,
 }) {}
 
+Future<Map<String, dynamic>> checkGeneratorApprovalService() async {
+  return {
+    'status': 'unsupported',
+    'message': 'نظام الموافقة متاح في نسخة الويب فقط.',
+  };
+}
+
 Future<Map<String, dynamic>> createGeneratorAccessRequest({
   required String requesterName,
   required String idToken,
