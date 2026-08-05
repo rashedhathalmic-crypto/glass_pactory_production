@@ -13,6 +13,7 @@ const _approvalServiceUrl = String.fromEnvironment(
   defaultValue: _defaultApprovalServiceUrl,
 );
 const _approvalUntilKey = 'glass_cnc_access_approved_until';
+const _requestDecisionWindow = Duration(minutes: 30);
 
 Future<bool> requestGeneratorNotificationPermission() async {
   try {
@@ -145,7 +146,7 @@ Future<Map<String, dynamic>> createGeneratorAccessRequest({
       'requestId': requestId,
       'pollToken': pollToken,
       'expiresAt': now
-          .add(const Duration(minutes: 10))
+          .add(_requestDecisionWindow)
           .millisecondsSinceEpoch,
     };
   } on Object {
