@@ -1,0 +1,116 @@
+name: H9 One v4 Final Gated Build
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  h9-final:
+    if: github.head_ref == 'h9one-v4-build-run3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - uses: android-actions/setup-android@v3
+      - name: Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - name: Gate exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip
+          echo "f024467cbc24796e17438b6517dbf928e780930bd475e94c6e70c76c9463edd6  .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip" | sha256sum -c -
+          unzip -t .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip >/dev/null
+          rm -rf /tmp/h9work && mkdir -p /tmp/h9work
+          unzip -q .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip -d /tmp/h9work
+          test -f /tmp/h9work/H9_One_v4_Alpha2/app/build.gradle
+      - name: Gradle wrapper
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
+          chmod +x gradlew tests/run5.sh
+          ./gradlew --version
+      - name: Five full clean Android builds
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > FULL_BUILD_5X.txt
+          mkdir -p cycle-apks
+          for n in 1 2 3 4 5; do
+            echo "=== FULL ANDROID BUILD $n/5 ===" | tee -a FULL_BUILD_5X.txt
+            ./gradlew --no-daemon clean assembleDebug 2>&1 | tee -a FULL_BUILD_5X.txt
+            APK=app/build/outputs/apk/debug/app-debug.apk
+            test -s "$APK"
+            unzip -t "$APK" >/dev/null
+            cp "$APK" "cycle-apks/H9-One-v4-Alpha2-cycle-$n.apk"
+            echo "PASS FULL BUILD $n" | tee -a FULL_BUILD_5X.txt
+          done
+          cp cycle-apks/H9-One-v4-Alpha2-cycle-5.apk H9-One-v4-Alpha2.apk
+      - name: Five host verification cycles
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/run5.sh | tee TEST_OUTPUT_FINAL_5X.txt
+      - name: Final verify and report
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s H9-One-v4-Alpha2.apk
+          unzip -t H9-One-v4-Alpha2.apk >/dev/null
+          APK_SHA=$(sha256sum H9-One-v4-Alpha2.apk | awk '{print $1}')
+          SIZE=$(stat -c%s H9-One-v4-Alpha2.apk)
+          printf '%s  H9-One-v4-Alpha2.apk\n' "$APK_SHA" > APK_SHA256.txt
+          cat > FINAL_TEST_REPORT.md <<EOF
+          # H9 One v4 Alpha 2 — Final Build Verification
+          - Exact source SHA256: f024467cbc24796e17438b6517dbf928e780930bd475e94c6e70c76c9463edd6
+          - Full Android clean build cycles: 5/5 PASS
+          - APK integrity checks: 5/5 PASS
+          - Host feature verification cycles: 5/5 PASS
+          - Host split-logic tests: 5/5 PASS
+          - Final APK size: $SIZE bytes
+          - Final APK SHA256: $APK_SHA
+          - Package: com.h9one.safe
+          - Build type: debug/installable APK
+          - Device/ADB testing: not used
+          EOF
+          cd /tmp/h9work
+          zip -qr /tmp/H9_One_v4_Alpha2_COMPLETE.zip H9_One_v4_Alpha2
+      - name: Publish gated output to temporary branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .h9build/output
+          cp /tmp/h9work/H9_One_v4_Alpha2/H9-One-v4-Alpha2.apk .h9build/output/
+          cp /tmp/h9work/H9_One_v4_Alpha2/FINAL_TEST_REPORT.md .h9build/output/
+          cp /tmp/h9work/H9_One_v4_Alpha2/APK_SHA256.txt .h9build/output/
+          cp /tmp/h9work/H9_One_v4_Alpha2/FULL_BUILD_5X.txt .h9build/output/
+          cp /tmp/h9work/H9_One_v4_Alpha2/TEST_OUTPUT_FINAL_5X.txt .h9build/output/
+          cp /tmp/H9_One_v4_Alpha2_COMPLETE.zip .h9build/output/
+          git config user.name "H9 CI Build"
+          git config user.email "h9-ci@users.noreply.github.com"
+          git add .h9build/output
+          git commit -m "temp: publish H9 v4 gated 5x build output"
+          git push origin HEAD:${{ github.head_ref }}
