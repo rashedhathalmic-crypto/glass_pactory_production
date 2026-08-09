@@ -69,12 +69,16 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Set up Android command-line tools
+        uses: android-actions/setup-android@v3
+
       - name: Ensure Android SDK 35
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          sdkmanager --list_installed
 
       - name: Restore H9 One v4 source
         shell: bash
