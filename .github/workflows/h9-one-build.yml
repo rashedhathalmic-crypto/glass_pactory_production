@@ -1,0 +1,61 @@
+name: Build H9 One APK
+
+on:
+  push:
+    branches: [h9-one-build]
+    paths:
+      - 'h9-one-build/**'
+      - '.github/workflows/h9-one-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: h9-one-build
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools' >/dev/null
+
+      - name: Decode H9 One source
+        shell: bash
+        run: |
+          rm -rf /tmp/h9-src
+          mkdir -p /tmp/h9-src
+          base64 -d h9-one-build/H9_One_Full_v3_Source.zip.b64 > /tmp/H9_One_Full_v3_Source.zip
+          unzip -q /tmp/H9_One_Full_v3_Source.zip -d /tmp/h9-src
+
+      - name: Build debug APK
+        working-directory: /tmp/h9-src/H9_One
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Collect APK
+        run: |
+          mkdir -p h9-one-build/output
+          cp /tmp/h9-src/H9_One/app/build/outputs/apk/debug/app-debug.apk h9-one-build/output/H9-One-Full-v3-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: H9-One-Full-v3-APK
+          path: h9-one-build/output/H9-One-Full-v3-debug.apk
+          if-no-files-found: error
+          retention-days: 7
