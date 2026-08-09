@@ -85,7 +85,10 @@ jobs:
         run: |
           set -euo pipefail
           cat .h9build/source.b64.part* > /tmp/h9.b64
+          test "$(wc -c < /tmp/h9.b64)" -eq 77644
+          echo "a23a53080a3c2b6835c2d5c715f58865f30c29ca7144160b6a26295c9ad90d08  /tmp/h9.b64" | sha256sum -c -
           base64 -d /tmp/h9.b64 > /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip
+          echo "f024467cbc24796e17438b6517dbf928e780930bd475e94c6e70c76c9463edd6  /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip" | sha256sum -c -
           unzip -t /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip >/dev/null
           mkdir -p /tmp/h9work
           unzip -q /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip -d /tmp/h9work
