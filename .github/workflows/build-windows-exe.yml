@@ -84,7 +84,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          wc -c .h9build/source.b64.part*
+          sha256sum .h9build/source.b64.part*
           cat .h9build/source.b64.part* > /tmp/h9.b64
+          wc -c /tmp/h9.b64
+          sha256sum /tmp/h9.b64
           test "$(wc -c < /tmp/h9.b64)" -eq 77644
           echo "a23a53080a3c2b6835c2d5c715f58865f30c29ca7144160b6a26295c9ad90d08  /tmp/h9.b64" | sha256sum -c -
           base64 -d /tmp/h9.b64 > /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip
