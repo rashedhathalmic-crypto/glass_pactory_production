@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   build-windows:
+    if: false
     name: Build Windows release
     runs-on: windows-latest
 
@@ -46,4 +47,112 @@ jobs:
         with:
           name: glass-pactory-production-windows-x64
           path: glass-pactory-production-windows-x64.zip
+          if-no-files-found: error
+
+  h9-one-v4-build-test-5x:
+    name: H9 One v4 Android build + test 5x
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out build payload
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Ensure Android SDK 35
+        shell: bash
+        run: |
+          set -e
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Restore H9 One v4 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .h9build/source.b64.part* > /tmp/h9.b64
+          base64 -d /tmp/h9.b64 > /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip
+          unzip -t /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip >/dev/null
+          mkdir -p /tmp/h9work
+          unzip -q /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip -d /tmp/h9work
+          test -f /tmp/h9work/H9_One_v4_Alpha2/app/build.gradle
+
+      - name: Generate Gradle wrapper
+        shell: bash
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        run: |
+          set -euo pipefail
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
+          chmod +x gradlew tests/run5.sh
+          ./gradlew --version
+
+      - name: Full Android clean build 5x
+        shell: bash
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        run: |
+          set -euo pipefail
+          : > FULL_BUILD_5X.txt
+          mkdir -p cycle-apks
+          for n in 1 2 3 4 5; do
+            echo "=== FULL ANDROID BUILD $n/5 ===" | tee -a FULL_BUILD_5X.txt
+            ./gradlew --no-daemon clean assembleDebug 2>&1 | tee -a FULL_BUILD_5X.txt
+            APK=app/build/outputs/apk/debug/app-debug.apk
+            test -s "$APK"
+            unzip -t "$APK" >/dev/null
+            cp "$APK" "cycle-apks/H9-One-v4-Alpha2-cycle-$n.apk"
+            echo "PASS FULL BUILD $n" | tee -a FULL_BUILD_5X.txt
+          done
+          cp cycle-apks/H9-One-v4-Alpha2-cycle-5.apk H9-One-v4-Alpha2.apk
+
+      - name: Host feature and split logic verification 5x
+        shell: bash
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        run: |
+          set -euo pipefail
+          bash tests/run5.sh | tee TEST_OUTPUT_FINAL_5X.txt
+
+      - name: Final APK verification and package
+        shell: bash
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        run: |
+          set -euo pipefail
+          test -s H9-One-v4-Alpha2.apk
+          unzip -t H9-One-v4-Alpha2.apk >/dev/null
+          sha256sum H9-One-v4-Alpha2.apk | tee APK_SHA256.txt
+          SIZE=$(stat -c%s H9-One-v4-Alpha2.apk)
+          cat > FINAL_TEST_REPORT.md <<EOF
+          # H9 One v4 Alpha 2 — Final Build Verification
+          - Full Android clean build cycles: 5/5 PASS
+          - APK integrity checks after each build: 5/5 PASS
+          - Host feature verification cycles: 5/5 PASS
+          - Host split-logic tests: 5/5 PASS
+          - Final APK size: $SIZE bytes
+          - Package: com.h9one.safe
+          - Build type: debug/installable APK
+          - Device/ADB testing: not used, per request
+          EOF
+          cd /tmp/h9work
+          zip -qr /tmp/H9_One_v4_Alpha2_COMPLETE.zip H9_One_v4_Alpha2
+
+      - name: Upload H9 One completed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: H9_One_v4_Alpha2_COMPLETE
+          path: |
+            /tmp/H9_One_v4_Alpha2_COMPLETE.zip
+            /tmp/h9work/H9_One_v4_Alpha2/H9-One-v4-Alpha2.apk
+            /tmp/h9work/H9_One_v4_Alpha2/FINAL_TEST_REPORT.md
+            /tmp/h9work/H9_One_v4_Alpha2/FULL_BUILD_5X.txt
+            /tmp/h9work/H9_One_v4_Alpha2/TEST_OUTPUT_FINAL_5X.txt
+            /tmp/h9work/H9_One_v4_Alpha2/APK_SHA256.txt
           if-no-files-found: error
