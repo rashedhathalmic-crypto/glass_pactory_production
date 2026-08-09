@@ -45,7 +45,7 @@ jobs:
         run: |
           rm -rf /tmp/h9-src
           mkdir -p /tmp/h9-src
-          base64 -d h9-one-build/H9_One_Full_v3_Source.zip.b64 > /tmp/H9_One_Full_v3_Source.zip
+          cat h9-one-build/chunks/part-* | base64 -d > /tmp/H9_One_Full_v3_Source.zip
           unzip -q /tmp/H9_One_Full_v3_Source.zip -d /tmp/h9-src
 
       - name: Build debug APK
