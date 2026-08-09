@@ -1,0 +1,106 @@
+name: H9 One v4 full build verification
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-5x:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Android SDK 35
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - name: Restore H9 source package
+        shell: bash
+        run: |
+          cat > /tmp/h9.b64 <<'EOF_B64'
+UEsDBAoAAAAAAKOgC1tERpPUvQcAAL0HAAAbABwASDlfT25lX3Y0X0FscGhhMi9SRUFETUVfQVIubWRVVAkAA2KQmGligJhldXgLAAEEAAAAAAQAAAAAIyBIIE9uZSDigJQg4oCU2YHZgSDYp9mE2YHZhNmGINin2YTYp9mGINmB2LHZhyDQp9mGINio2YjYp9mG2KfbhNmK2YQKCtmF2KfZhyDYsdmF2LHYp9mG2KfbhCDYp9mG2KjZhCDZhNio2YPYpyDZhNmGINij2YXYoNmDIC0gQWxwaGEgMgoK2YjZhtin2KzZhSDZhdmI2K/Zh9ip2Kkg4oCU2YXYp9mE2YTYp9mGINmF2LHYt9ix2YPYqSDYqNin2YXYp9mE2YTYp9mFINix2KfZhNil2YQg2LnYudmK2K/Yr9mKINmF2YjZitmG2YrYpyDYs9mE2KfZhyDYp9mGINmE2YTZhNi02YrYp9mG2Kkg2LnZhNin2Kkg2YHZhtin2KfZhCDZhNiz2YrYudin2YTZhCAyMDI1LgoK4oCUINmF2Kcg2KrZhSDYp9mE2KfZhNmB2KfZhSDZg9mKINin2YTYp9mG2KfZhNmHINi32YggQWxwaGEgMgoKLSDYp9mE2YXYrNin2YfYqSDYp9mE2YTZgtmG2KrZhSDYp9mE2LnZitin2YrYqSDYudmD2KfZhNix2Yog2KfZhNmD2Kkg2KfZhNio2YTYsdmB2K/ZhyDZhNix2K/Zhdin2YrYqSDZhNmG2YXZitin2LEuCi0gTmF2aXRlbCDZg9iu2YrYp9ixINin2YTZhdmE2KfYrdipINin2YTYp9mI2Yog2YTZhNmE2KfYrditINin2YTYp9mI2YjZhy4KLSBHb29nbGUgTWFwcyDZg9iu2YrYp9ixINin2YTZhdmE2KfYrdipINin2YTYq9in2YbZitinLgotINiy2LEg2YXYp9mI2YIg2KvYp9io2Kog2YrZgdiq2K0g2KLYrtixINij2K7YsSDYqNix2YbYp9mF2Kwg2YXYp9mE2KfYrditINmF2YUg2KrZh9mI2YQg2KfZhNmF2YTYp9it2Kkg2YHYtSDYp9mE2LTYp9i02KkuCi0g2YXYr9mK2LEg2LTYp9i02KrZitmGOiDYqtmG2LHYrdmK2YQgKyDZgdiq2K0g2YXYudmE2YjZhdin2Kog2KfZhNiq2LfYqNmK2YIgKyDYqti02L7Yr9mK2LUuCi0g2YXYr9mK2LEg2KrYt9io2YrZgtin2Kog2YTZhNmK2KfZg9mEINmF2YbZhyDYqtis2LHYqSDYp9mE2KrYt9io2YrZgtin2KogKyDZgdiq2K0g2YXYudmE2YjZhdin2Kog2KfZhNiq2LfYqNmK2YIg2KjYp9mE2LTYp9i02KkuCi0gV2ktRmnYrCDYrdin2YTYqSDYp9mE2KfYqti12KfZhCDZhNiC2YjYsdmFINin2YTYp9i52K/Yp9iv2KfYqiDZiNmF2K3Yp9mI2YTZhyDZgdiq2K0g2KXYudiv2KfYr9in2KogKyDZhdit2KfZiNmE2Kkg2YHYqtiSINmI2KfZiiDYp9mE2KjYsdmG2KfZhdisINin2YTYo9i12YTZii4KLSDYp9mE2KrYt9io2YrZgtin2Kog2YXYqtmI2K3Yr9ipOiDZiti02L7Yr9mKINmF2YYg2KfZhNio2LHZhtin2YXYrSDYp9mE2YXYqtmI2K/Yj9ipICsg2KLYr9ix2YrZhiDYp9mE2YXYhNmB2KfYqiArINin2YTYstmK2KfYr9ipINi52YTZiSDYp9mE2KrYt9io2YrZgtin2KogKyDYp9mE2YXZhNmB2KfYqiDYp9mE2YbYudmF2YrYqSDYqNmF2K/Yp9mFINiz2YXYrNmGINin2YTYrdmF2KfZitipINin2YTYo9mI2YTYry4KLSDYp9mE2YbZgtmEOiDZiNmE2KfYp9i52LEgSFBURUwvU0FGINmI2K/Yudin2YUg2KrYrtiy2YrZhiDZhdmB2YHYqtmI2K0uCi0g2YTZhNin2YrZhiDYp9mE2KjYsdmGOiBHUFPYrCDYp9mE2LPYsdin2LnYqSDYp9mE2LnYp9mE2YrYqSDZiNin2YTYp9ix2KrZgdin2Lkg2YjYp9mE2KjZiNi12YTYqS4KLSBCYXNzIEJvb3N0OiDZitmB2KrYrSDYp9mE2KrYt9io2YrZgiDYp9mE2YXZiNis2YjYryDYp9mE2KPYtdmE2Yog2KPYryDYp9mE2KXYudiv2KfYr9in2Kog2YfZhdmI2KfZhCDZhNmFINmK2KrYrNmI2YQg2KfZhNmF2KjYp9i02LEuCi0g2KXYudiv2KfYr9in2Kog2KfZhNiz2YrYp9ix2Kk6INio2K3YqyDYudin2YUg2KrYt9io2YrZgiDYp9mE2LPZitin2LHZhyDZgdiq2K3Zh9inINmF2YYg2KrYsdmD2YfYp9iMINmI2YTYpyDZitimI2KzYryDYt9io2Yog2YHYqtiSINi02YrYptin2KrYpy4KLSDYq9mK2YXZg9iq2Kkg2LTYp9i02Kk6IE9FTSBCbGFjayAvIERlc2VydCAvIE5pZ2h0IC8gU2lsdmVyLgotINi12YHYrdipINiq2LTYrti12YrYtSDYr9in2K7ZhNmK2Kkg2KrYudix2LYgQW5kcm9pZCDZiNi52K/YryDYp9mE2LTYp9i02KfYqiDZiNin2YTYqNmKINiq2YjYp9is2K8gR1dNIFNwbGl0LgoK4oCUINin2YTYqtmF2LPZitmSINin2YTZhdmB2KfYtNmKINmE2YXYr9mK2LEg2KfZhNi02KfYtNiq2YrZhiDYp9mE2KrYp9mE2YogKEhPTSkg2YHYsSDYp9mE2KjYsdmG2KfZhdisINin2YTYo9iz2KfYs9mKLiDZh9iw2KfYr9mKINmE2KfYqCDYqtmB2LnZitmEINin2YTZiNin2KzZh9ipINin2YTYp9mE2YrYqdipINmF2YXYp9mKINiq2KrYudin2YjYsiDYqtmC2YjZhSDYp9mE2KjYsdmG2KfZhdisINin2YTYo9i12YTbjC4KCiMjINmF2KfYs9mK2KrZhyDYp9mE2KjYsdmG2KfZhdisINin2YTYp9mF2KjYr9im2YrYqQoKMS4g2KfYqtmE2YXZiiDZhdmE2YEg2KfZhNi02KfYtNipINin2YTYo9mGINin2YTZqti12YXYutmKINmE2LPZitin2LHYqSDYp9mE2LPZitin2YLZgi4KMi4g2KfZgdiq2K0gKipI9IE9uZSoqINmF2YYg2YXYr9mK2LEg2KfZhNiq2LfYqNmK2YLYp9iqLgozLiDYp9mB2KrYrSDYp9mE2YXYr9mK2LEg2KfZhNi12LHYp9mB2Yog2YjYp9mE2YbYp9mB2LDYqSDYp9mE2YXYv9mE2YjYqNipLgo0LiDYp9iu2KrYsSAqKkhOIFLbjCApINin2K7YqNix2Ycg2YXYsSDYp9mE2YLYp9im2YXYqSDYp9mE2YXZiNis2YjYr9ipINmF2Ksg2LTYsdmK2Lcg2KfZhNiq2KrYp9io2Lkg2KfZhNmF2YTZiNin2YbZii4KCiMjINin2YTYtNmGINmK2YHZiNi62YUgbm90IHdvcmtpbmc/CgoxLiDYp9mB2KrYrSDYp9mE2KrYt9io2YrZgiDYp9mE2LPYp9io2YIuCjIuINin2YHYqtmGINin2YTZhdmF2KfZhNis2Kcg2YTZhNinINmK2LPYqtmF2YrYsSDZhNiy2Kcg2KfZhNi02KfYtNipINin2YTYs9in2KbZgi4KMy4g2KfYgdmC2YQg2KrYtNmI2YrYsSDYp9mE2KrYt9io2YrZgiDYp9mE2YbYtNio2Yog2KfZhNmB2LnZhNmKINmB2YLYtyDYudi12YTZh9inLgo0LiDZhNmE2LTYp9i02Kkg2KfZhNir2KfZhtmI2YrYqSDYp9iu2KrYsSDZgSDYrtin2YTZiiDZhdmGINin2YTZhdmI2KfYq9mIINin2YTYo9mI2YQuCg==
+EOF_B64
+          base64 -d /tmp/h9.b64 > /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip
+          mkdir -p /tmp/h9work
+          unzip -q /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip -d /tmp/h9work
+          test -f /tmp/h9work/H9_One_v4_Alpha2/app/build.gradle
+      - name: Generate Gradle Wrapper
+        shell: bash
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        run: |
+          gradle wrapper --gradle-version 8.9 --distribution-type bin
+          chmod +x gradlew tests/run5.sh
+          ./gradlew --version
+      - name: Full Android build 5x
+        shell: bash
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/h9builds
+          : > /tmp/FULL_BUILD_5X.txt
+          for n in 1 2 3 4 5; do
+            echo "=== FULL ANDROID BUILD $n/5 ===" | tee -a /tmp/FULL_BUILD_5X.txt
+            ./gradlew --no-daemon clean assembleDebug 2>&1 | tee -a /tmp/FULL_BUILD_5X.txt
+            APK=app/build/outputs/apk/debug/app-debug.apk
+            test -s "$APK"
+            unzip -t "$APK" >/dev/null
+            cp "$APK" "/tmp/h9builds/H9-One-v4-Alpha2-cycle-$n.apk"
+            echo "PASS FULL BUILD $n" | tee -a /tmp/FULL_BUILD_5X.txt
+          done
+          cp /tmp/h9builds/H9-One-v4-Alpha2-cycle-5.apk H9-One-v4-Alpha2.apk
+      - name: Host logic and feature verification 5x
+        shell: bash
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        run: |
+          set -euo pipefail
+          bash tests/run5.sh | tee TEST_OUTPUT_FINAL_5X.txt
+      - name: Verify final APK and make report
+        shell: bash
+        working-directory: /tmp/h9work/H9_One_v4_Alpha2
+        run: |
+          set -euo pipefail
+          test -s H9-One-v4-Alpha2.apk
+          unzip -t H9-One-v4-Alpha2.apk >/dev/null
+          sha256sum H9-One-v4-Alpha2.apk | tee APK_SHA256.txt
+          SIZE=$(stat -c%s H9-One-v4-Alpha2.apk)
+          cat > FINAL_TEST_REPORT.md <<EOF
+          # H9 One v4 Alpha 2 — Final Build Verification
+          - Full Android clean build cycles: 5/5 PASS
+          - APK integrity checks: 5/5 PASS
+          - Host feature verification cycles: 5/5 PASS
+          - Host logic tests: 5/5 PASS
+          - Final APK size: $SIZE bytes
+          - Package: com.h9one.safe
+          - Build type: debug/installable APK
+          - Device/ADB testing: intentionally not used for this verification
+          EOF
+          cp /tmp/FULL_BUILD_5X.txt FULL_BUILD_5X.txt
+          cd /tmp/h9work
+          zip -qr /tmp/H9_One_v4_Alpha2_COMPLETE.zip H9_One_v4_Alpha2
+      - name: Upload completed package
+        uses: actions/upload-artifact@v4
+        with:
+          name: H9_One_v4_Alpha2_COMPLETE
+          path: |
+            /tmp/H9_One_v4_Alpha2_COMPLETE.zip
+            /tmp/h9work/H9_One_v4_Alpha2/H9-One-v4-Alpha2.apk
+            /tmp/h9work/H9_One_v4_Alpha2/FINAL_TEST_REPORT.md
+            /tmp/h9work/H9_One_v4_Alpha2/FULL_BUILD_5X.txt
+            /tmp/h9work/H9_One_v4_Alpha2/TEST_OUTPUT_FINAL_5X.txt
+            /tmp/h9work/H9_One_v4_Alpha2/APK_SHA256.txt
+          if-no-files-found: error
