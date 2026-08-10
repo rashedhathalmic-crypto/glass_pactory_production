@@ -33,7 +33,11 @@ jobs:
         run: |
           set -euo pipefail
           for n in $(seq -w 0 19); do test -s ".h9build/exact/chunk$n"; done
+          wc -c .h9build/exact/chunk{00..19}
+          sha256sum .h9build/exact/chunk{00..19}
           cat .h9build/exact/chunk{00..19} > /tmp/h9.b64
+          echo "TOTAL=$(wc -c < /tmp/h9.b64)"
+          echo "TOTAL_SHA=$(sha256sum /tmp/h9.b64 | cut -d' ' -f1)"
           test "$(wc -c < /tmp/h9.b64)" -eq 77644
           echo "a23a53080a3c2b6835c2d5c715f58865f30c29ca7144160b6a26295c9ad90d08  /tmp/h9.b64" | sha256sum -c -
           base64 -d /tmp/h9.b64 > /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip
