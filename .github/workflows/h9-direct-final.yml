@@ -33,6 +33,20 @@ jobs:
         run: |
           set -euo pipefail
           for n in $(seq -w 0 19); do test -s ".h9build/exact/chunk$n"; done
+          python3 - <<'PY'
+          from pathlib import Path
+          fixes = {
+              '.h9build/exact/chunk12': (3713, 'u', 'y'),
+              '.h9build/exact/chunk13': (3683, 'I', 'A'),
+          }
+          for path, (idx, old, new) in fixes.items():
+              p = Path(path)
+              s = p.read_text()
+              assert len(s) == 4000, (path, len(s))
+              assert s[idx] == old, (path, idx, s[idx], old)
+              s = s[:idx] + new + s[idx+1:]
+              p.write_text(s)
+          PY
           wc -c .h9build/exact/chunk{00..19}
           sha256sum .h9build/exact/chunk{00..19}
           cat .h9build/exact/chunk{00..19} > /tmp/h9.b64
