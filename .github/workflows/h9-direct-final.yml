@@ -28,15 +28,18 @@ jobs:
           set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
-      - name: Verify exact source ZIP
+      - name: Restore and verify exact source ZIP
         shell: bash
         run: |
           set -euo pipefail
           test -s .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip
-          echo "f024467cbc24796e17438b6517dbf928e780930bd475e94c6e70c76c9463edd6  .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip" | sha256sum -c -
-          unzip -t .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip >/dev/null
+          test "$(wc -c < .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip)" -eq 77644
+          echo "a23a53080a3c2b6835c2d5c715f58865f30c29ca7144160b6a26295c9ad90d08  .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip" | sha256sum -c -
+          base64 -d .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip > /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip
+          echo "f024467cbc24796e17438b6517dbf928e780930bd475e94c6e70c76c9463edd6  /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip" | sha256sum -c -
+          unzip -t /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip >/dev/null
           rm -rf /tmp/h9work && mkdir -p /tmp/h9work
-          unzip -q .h9build/H9_One_v4_Alpha2_TESTED_SOURCE.zip -d /tmp/h9work
+          unzip -q /tmp/H9_One_v4_Alpha2_TESTED_SOURCE.zip -d /tmp/h9work
           test -f /tmp/h9work/H9_One_v4_Alpha2/app/build.gradle
       - name: Generate Gradle wrapper
         shell: bash
