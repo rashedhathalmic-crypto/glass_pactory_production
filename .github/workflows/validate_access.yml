@@ -48,3 +48,13 @@ jobs:
             echo "Passwordless email-link flow must not be present"
             exit 1
           fi
+
+      - name: Verify deployed OTP backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --location --max-time 25 'https://script.google.com/macros/s/AKfycbwuTIRuDH8hFLw60DvR3ZMfmog5BtSXiCVXvD3KIy63Uh9Tmq6a2WIlYUNwB0FN41pnXg/exec?action=health')"
+          echo "$response"
+          echo "$response" | grep -q '"status":"healthy"'
+          echo "$response" | grep -q '"version":"email-otp-v2"'
+          echo "$response" | grep -q '"owner":"rashedhathalmic@gmail.com"'
