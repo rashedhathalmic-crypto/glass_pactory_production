@@ -58,9 +58,7 @@ void _addHiddenField(html.FormElement form, String name, String value) {
 
 Future<void> _submitHiddenForm(Map<String, String> fields) async {
   final body = html.document.body;
-  if (body == null) {
-    throw StateError('Document body unavailable');
-  }
+  if (body == null) throw StateError('Document body unavailable');
 
   final frameName =
       'glass_cnc_otp_${DateTime.now().microsecondsSinceEpoch}_${_randomHex(4)}';
@@ -80,10 +78,9 @@ Future<void> _submitHiddenForm(Map<String, String> fields) async {
   body.children
     ..add(iframe)
     ..add(form);
-
   try {
     form.submit();
-    await Future<void>.delayed(const Duration(milliseconds: 650));
+    await Future<void>.delayed(const Duration(milliseconds: 700));
   } finally {
     form.remove();
     iframe.remove();
@@ -95,10 +92,7 @@ Future<Map<String, dynamic>> _serviceQuery(
 ) async {
   final body = html.document.body;
   if (body == null) {
-    return {
-      'status': 'error',
-      'message': 'تعذر قراءة استجابة خدمة OTP.',
-    };
+    return {'status': 'error', 'message': 'تعذر قراءة استجابة خدمة OTP.'};
   }
 
   final storageKey =
@@ -112,7 +106,6 @@ Future<Map<String, dynamic>> _serviceQuery(
       '_': DateTime.now().millisecondsSinceEpoch.toString(),
     },
   );
-
   final script = html.ScriptElement()
     ..src = uri.toString()
     ..async = true;
@@ -120,7 +113,6 @@ Future<Map<String, dynamic>> _serviceQuery(
 
   late final StreamSubscription<html.Event> loadSubscription;
   late final StreamSubscription<html.Event> errorSubscription;
-
   loadSubscription = script.onLoad.listen((_) {
     if (!loaded.isCompleted) loaded.complete();
   });
@@ -131,7 +123,6 @@ Future<Map<String, dynamic>> _serviceQuery(
   });
 
   body.children.add(script);
-
   try {
     await loaded.future.timeout(const Duration(seconds: 12));
     final raw = html.window.localStorage[storageKey];
@@ -142,25 +133,15 @@ Future<Map<String, dynamic>> _serviceQuery(
             'خدمة OTP غير منشورة أو رابط Google Apps Script غير صحيح.',
       };
     }
-
     final decoded = jsonDecode(raw);
     if (decoded is! Map) {
-      return {
-        'status': 'error',
-        'message': 'استجابة خدمة OTP غير صحيحة.',
-      };
+      return {'status': 'error', 'message': 'استجابة خدمة OTP غير صحيحة.'};
     }
     return Map<String, dynamic>.from(decoded);
   } on TimeoutException {
-    return {
-      'status': 'error',
-      'message': 'انتهت مهلة الاتصال بخدمة OTP.',
-    };
+    return {'status': 'error', 'message': 'انتهت مهلة الاتصال بخدمة OTP.'};
   } on Object {
-    return {
-      'status': 'error',
-      'message': 'تعذر الاتصال بخدمة OTP.',
-    };
+    return {'status': 'error', 'message': 'تعذر الاتصال بخدمة OTP.'};
   } finally {
     await loadSubscription.cancel();
     await errorSubscription.cancel();
@@ -172,10 +153,7 @@ Future<Map<String, dynamic>> _serviceQuery(
 Future<Map<String, dynamic>> checkGeneratorApprovalService() async {
   if (!_approvalServiceUrl.startsWith('https://') ||
       !_approvalServiceUrl.endsWith('/exec')) {
-    return {
-      'status': 'error',
-      'message': 'رابط خدمة OTP غير صحيح.',
-    };
+    return {'status': 'error', 'message': 'رابط خدمة OTP غير صحيح.'};
   }
 
   final result = await _serviceQuery({'action': 'health'});
@@ -215,37 +193,33 @@ Future<Map<String, dynamic>> createGeneratorAccessRequest({
 
     final deadline = now.add(const Duration(seconds: 15));
     while (DateTime.now().isBefore(deadline)) {
-      final status = await pollGeneratorAccessRequest(
+      final result = await pollGeneratorAccessRequest(
         requestId: requestId,
         pollToken: pollToken,
       );
-      final code = status['status']?.toString() ?? 'error';
-      if (code == 'otp_sent') {
+      final status = result['status']?.toString() ?? 'error';
+      if (status == 'otp_sent') {
         return {
           'status': 'submitted',
           'requestId': requestId,
           'pollToken': pollToken,
-          'expiresAt': status['expiresAt'] ??
+          'expiresAt': result['expiresAt'] ??
               now.add(_otpLifetime).millisecondsSinceEpoch,
-          'message': status['message'],
+          'message': result['message'],
         };
       }
-      if (code == 'pending' || code == 'invalid') {
+      if (status == 'pending' || status == 'invalid') {
         await Future<void>.delayed(const Duration(milliseconds: 550));
         continue;
       }
-      return status;
+      return result;
     }
-
     return {
       'status': 'error',
       'message': 'لم تؤكد خدمة OTP إرسال الكود. حاول مرة أخرى.',
     };
   } on Object {
-    return {
-      'status': 'error',
-      'message': 'تعذر إرسال طلب OTP.',
-    };
+    return {'status': 'error', 'message': 'تعذر إرسال طلب OTP.'};
   }
 }
 
@@ -263,21 +237,26 @@ Future<Map<String, dynamic>> verifyGeneratorAccessOtp({
     };
   }
 
+  final attemptId =
+      'try_${DateTime.now().millisecondsSinceEpoch}_${_randomHex(8)}';
   try {
     await _submitHiddenForm({
       'action': 'verifyOtp',
       'requestId': requestId,
       'pollToken': pollToken,
+      'attemptId': attemptId,
       'otp': cleanOtp,
       'idToken': idToken,
     });
 
     final deadline = DateTime.now().add(const Duration(seconds: 12));
     while (DateTime.now().isBefore(deadline)) {
-      final result = await pollGeneratorAccessRequest(
-        requestId: requestId,
-        pollToken: pollToken,
-      );
+      final result = await _serviceQuery({
+        'action': 'poll',
+        'id': requestId,
+        'token': pollToken,
+        'attempt': attemptId,
+      });
       final status = result['status']?.toString() ?? 'error';
       if (status == 'approved' ||
           status == 'invalid_otp' ||
@@ -289,16 +268,9 @@ Future<Map<String, dynamic>> verifyGeneratorAccessOtp({
       }
       await Future<void>.delayed(const Duration(milliseconds: 450));
     }
-
-    return {
-      'status': 'error',
-      'message': 'لم تصل نتيجة التحقق من OTP.',
-    };
+    return {'status': 'error', 'message': 'لم تصل نتيجة التحقق من OTP.'};
   } on Object {
-    return {
-      'status': 'error',
-      'message': 'تعذر التحقق من كود OTP.',
-    };
+    return {'status': 'error', 'message': 'تعذر التحقق من كود OTP.'};
   }
 }
 
@@ -313,7 +285,6 @@ Future<Map<String, dynamic>> pollGeneratorAccessRequest({
   });
 }
 
-// Deliberately disabled: a fresh password + OTP is required on reload.
 DateTime? readGeneratorApprovalExpiry() => null;
 void saveGeneratorApprovalExpiry(DateTime approvedUntil) {}
 void clearGeneratorApproval() {}
