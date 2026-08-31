@@ -41,6 +41,7 @@ jobs:
           flutter build web
           --release
           --base-href "/glass_pactory_production/"
+          --dart-define=ACCESS_APPROVAL_URL=https://script.google.com/macros/s/AKfycbwuTIRuDH8hFLw60DvR3ZMfmog5BtSXiCVXvD3KIy63Uh9Tmq6a2WIlYUNwB0FN41pnXg/exec
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4

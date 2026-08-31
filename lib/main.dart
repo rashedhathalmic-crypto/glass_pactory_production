@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'core/helpers/generator_login_alert.dart';
@@ -16,6 +17,14 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Never restore an old browser login into the protected generator. Every
+  // reload/new browser session must pass password + fresh owner OTP again.
+  if (kIsWeb) {
+    await FirebaseAuth.instance.setPersistence(Persistence.NONE);
+    await FirebaseAuth.instance.signOut();
+  }
+
   runApp(const NcGeneratorApp());
 }
 
@@ -41,33 +50,7 @@ class _GeneratorLoginGate extends StatefulWidget {
 }
 
 class _GeneratorLoginGateState extends State<_GeneratorLoginGate> {
-  bool _checkingSession = true;
   bool _approved = false;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_restoreSession());
-  }
-
-  Future<void> _restoreSession() async {
-    final user = await FirebaseAuth.instance.authStateChanges().first;
-    final approvedUntil = readGeneratorApprovalExpiry();
-    final approved = user != null &&
-        approvedUntil != null &&
-        approvedUntil.isAfter(DateTime.now());
-
-    if (!approved && user != null) {
-      clearGeneratorApproval();
-      await FirebaseAuth.instance.signOut();
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _approved = approved;
-      _checkingSession = false;
-    });
-  }
 
   void _handleApproved() {
     if (!mounted) return;
@@ -83,17 +66,9 @@ class _GeneratorLoginGateState extends State<_GeneratorLoginGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (_checkingSession) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (_approved && user != null) {
+    if (_approved && FirebaseAuth.instance.currentUser != null) {
       return _GeneratorHome(onSignOut: _handleSignOut);
     }
-
     return _GeneratorLoginScreen(onApproved: _handleApproved);
   }
 }
@@ -115,19 +90,22 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _otpController = TextEditingController();
 
   bool _isLoading = false;
-  bool _waitingForApproval = false;
+  bool _otpStep = false;
   bool _obscurePassword = true;
-  bool _cancelPolling = false;
+  String? _requestId;
+  String? _pollToken;
+  DateTime? _otpExpiresAt;
   String? _statusMessage;
   bool _statusIsError = false;
 
   @override
   void dispose() {
-    _cancelPolling = true;
     _usernameController.dispose();
     _passwordController.dispose();
+    _otpController.dispose();
     super.dispose();
   }
 
@@ -137,35 +115,45 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
     return int.tryParse(value?.toString() ?? '');
   }
 
-  Future<void> _setFailure(String message) async {
-    clearGeneratorApproval();
+  Future<void> _resetLogin({String? error}) async {
     await FirebaseAuth.instance.signOut();
     if (!mounted) return;
     setState(() {
       _isLoading = false;
-      _waitingForApproval = false;
-      _statusMessage = message;
-      _statusIsError = true;
+      _otpStep = false;
+      _requestId = null;
+      _pollToken = null;
+      _otpExpiresAt = null;
+      _otpController.clear();
+      _statusMessage = error;
+      _statusIsError = error != null;
     });
   }
 
-  Future<void> _cancelRequest() async {
-    _cancelPolling = true;
-    await _setFailure('تم إلغاء طلب الدخول.');
+  String _friendlyAuthError(FirebaseAuthException error) {
+    switch (error.code) {
+      case 'wrong-password':
+      case 'invalid-credential':
+      case 'user-not-found':
+        return 'اسم المستخدم أو كلمة المرور غير صحيحة.';
+      case 'too-many-requests':
+        return 'محاولات كثيرة خلال وقت قصير. انتظر قليلًا ثم أعد المحاولة.';
+      case 'network-request-failed':
+        return 'تعذر الاتصال بخدمة تسجيل الدخول.';
+      default:
+        return 'تعذر التحقق من كلمة المرور.';
+    }
   }
 
-  Future<void> _signIn() async {
-    if (_isLoading || _waitingForApproval) return;
+  Future<void> _signInAndSendOtp() async {
+    if (_isLoading || _otpStep) return;
     if (!_formKey.currentState!.validate()) return;
 
-    _cancelPolling = false;
-
-    // Browser permission prompts must start from the user's click.
     final notificationPermission = requestGeneratorNotificationPermission();
 
     setState(() {
       _isLoading = true;
-      _statusMessage = 'جارٍ التحقق من بيانات الدخول...';
+      _statusMessage = 'جارٍ التحقق من كلمة المرور...';
       _statusIsError = false;
     });
 
@@ -177,7 +165,7 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
       );
       final idToken = await credential.user?.getIdToken(true);
       if (idToken == null || idToken.isEmpty) {
-        await _setFailure('تعذر إنشاء رمز دخول آمن. حاول مرة أخرى.');
+        await _resetLogin(error: 'تعذر إنشاء جلسة تحقق آمنة.');
         return;
       }
 
@@ -188,117 +176,163 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
       );
 
       if (request['status'] != 'submitted') {
-        await _setFailure(
-          request['message']?.toString() ??
-              'تعذر إرسال طلب الموافقة إلى البريد.',
+        await _resetLogin(
+          error: request['message']?.toString() ??
+              'تعذر إرسال كود التحقق إلى البريد.',
         );
         return;
       }
 
       final requestId = request['requestId']?.toString() ?? '';
       final pollToken = request['pollToken']?.toString() ?? '';
+      if (requestId.isEmpty || pollToken.isEmpty) {
+        await _resetLogin(error: 'تعذر إنشاء طلب OTP آمن.');
+        return;
+      }
+
       final expiresAtMillis = _asInt(request['expiresAt']) ??
           DateTime.now()
               .add(const Duration(minutes: 10))
               .millisecondsSinceEpoch;
-      final expiresAt =
-          DateTime.fromMillisecondsSinceEpoch(expiresAtMillis);
-      final requestStartedAt = DateTime.now();
 
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _waitingForApproval = true;
+        _otpStep = true;
+        _requestId = requestId;
+        _pollToken = pollToken;
+        _otpExpiresAt =
+            DateTime.fromMillisecondsSinceEpoch(expiresAtMillis);
         _statusMessage =
-            'تم إرسال طلب الموافقة إلى البريد. بانتظار القبول...';
+            'تم إرسال كود من 6 أرقام إلى rashedhathalmic@gmail.com.';
         _statusIsError = false;
       });
 
-      while (mounted &&
-          !_cancelPolling &&
-          DateTime.now().isBefore(expiresAt)) {
-        await Future<void>.delayed(const Duration(seconds: 2));
-        if (_cancelPolling || !mounted) return;
-
-        final result = await pollGeneratorAccessRequest(
-          requestId: requestId,
-          pollToken: pollToken,
+      if (await notificationPermission) {
+        showGeneratorLoginNotification(
+          title: 'تم إرسال كود الدخول',
+          body: 'راجع بريد المالك لإكمال الدخول إلى Glass CNC Tools.',
         );
-        final status = result['status']?.toString() ?? 'error';
+      }
+    } on FirebaseAuthException catch (error) {
+      await _resetLogin(error: _friendlyAuthError(error));
+    } on Object {
+      await _resetLogin(
+        error: 'تعذر إكمال طلب الدخول. تحقق من الاتصال وأعد المحاولة.',
+      );
+    }
+  }
 
-        if (status == 'pending') continue;
+  Future<void> _verifyOtp() async {
+    if (_isLoading || !_otpStep) return;
 
-        // The first poll can arrive before Apps Script finishes writing.
-        if (status == 'invalid' &&
-            DateTime.now().difference(requestStartedAt) <
-                const Duration(seconds: 20)) {
-          continue;
-        }
+    final otp = _otpController.text.trim();
+    if (!RegExp(r'^\d{6}$').hasMatch(otp)) {
+      setState(() {
+        _statusMessage = 'أدخل الكود المكون من 6 أرقام.';
+        _statusIsError = true;
+      });
+      return;
+    }
 
-        if (status == 'approved') {
-          final approvedUntilMillis = _asInt(result['approvedUntil']) ??
-              DateTime.now()
-                  .add(const Duration(hours: 4))
-                  .millisecondsSinceEpoch;
-          final approvedUntil =
-              DateTime.fromMillisecondsSinceEpoch(approvedUntilMillis);
-          saveGeneratorApprovalExpiry(approvedUntil);
+    if (_otpExpiresAt != null &&
+        !DateTime.now().isBefore(_otpExpiresAt!)) {
+      await _resetLogin(error: 'انتهت صلاحية الكود. أرسل كودًا جديدًا.');
+      return;
+    }
 
-          if (await notificationPermission) {
-            showGeneratorLoginNotification(
-              title: 'تم قبول الدخول',
-              body:
-                  'تم السماح بالدخول إلى Glass CNC Tools لمدة 4 ساعات.',
-            );
-          }
+    final user = FirebaseAuth.instance.currentUser;
+    final requestId = _requestId;
+    final pollToken = _pollToken;
+    if (user == null || requestId == null || pollToken == null) {
+      await _resetLogin(error: 'انتهت جلسة كلمة المرور. سجّل الدخول من جديد.');
+      return;
+    }
 
-          if (!mounted) return;
-          widget.onApproved();
-          return;
-        }
+    setState(() {
+      _isLoading = true;
+      _statusMessage = 'جارٍ التحقق من الكود...';
+      _statusIsError = false;
+    });
 
-        if (status == 'rejected') {
-          await _setFailure('تم رفض طلب الدخول من البريد.');
-          return;
-        }
-        if (status == 'expired') {
-          await _setFailure(
-            'انتهت مهلة الموافقة. سجّل الدخول وأرسل طلبًا جديدًا.',
-          );
-          return;
-        }
-        if (status == 'error') {
-          await _setFailure(
-            result['message']?.toString() ??
-                'تعذر إرسال بريد الموافقة. تحقق من خدمة البريد ثم أعد المحاولة.',
-          );
-          return;
-        }
-
-        await _setFailure(
-          'لم تصل حالة موافقة صحيحة. أعد المحاولة بعد التأكد من نشر خدمة الموافقة.',
-        );
+    try {
+      final idToken = await user.getIdToken(true);
+      if (idToken == null || idToken.isEmpty) {
+        await _resetLogin(error: 'تعذر تحديث جلسة التحقق.');
         return;
       }
 
-      if (!_cancelPolling) {
-        await _setFailure(
-          'انتهت مهلة طلب الدخول دون موافقة. أرسل طلبًا جديدًا.',
-        );
-      }
-    } on FirebaseAuthException {
-      await _setFailure('اسم المستخدم أو كلمة المرور غير صحيحة.');
-    } on Object {
-      await _setFailure(
-        'تعذر إكمال طلب الدخول. تحقق من الاتصال وأعد المحاولة.',
+      final result = await verifyGeneratorAccessOtp(
+        requestId: requestId,
+        pollToken: pollToken,
+        otp: otp,
+        idToken: idToken,
       );
+      final status = result['status']?.toString() ?? 'error';
+
+      if (status == 'approved') {
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+          _statusMessage = 'تم التحقق. جارٍ فتح المولد...';
+          _statusIsError = false;
+        });
+        showGeneratorLoginNotification(
+          title: 'تم قبول الدخول',
+          body: 'تم التحقق من كلمة المرور وكود البريد بنجاح.',
+        );
+        widget.onApproved();
+        return;
+      }
+
+      if (status == 'invalid_otp') {
+        final remaining = result['attemptsRemaining'];
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+          _otpController.clear();
+          _statusMessage = remaining == null
+              ? 'الكود غير صحيح.'
+              : 'الكود غير صحيح. المحاولات المتبقية: $remaining';
+          _statusIsError = true;
+        });
+        return;
+      }
+
+      if (status == 'expired') {
+        await _resetLogin(error: 'انتهت صلاحية الكود. أرسل كودًا جديدًا.');
+        return;
+      }
+      if (status == 'locked') {
+        await _resetLogin(
+          error: 'تم إيقاف الطلب بسبب كثرة محاولات الكود الخاطئة.',
+        );
+        return;
+      }
+      if (status == 'unauthorized') {
+        await _resetLogin(error: 'تم رفض جلسة الدخول من الخادم.');
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _statusMessage = result['message']?.toString() ??
+            'تعذر التحقق من الكود. حاول مرة أخرى.';
+        _statusIsError = true;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _statusMessage = 'تعذر الاتصال بخدمة OTP.';
+        _statusIsError = true;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final fieldsEnabled = !_isLoading && !_waitingForApproval;
-
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
@@ -325,55 +359,85 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 32),
-                  TextFormField(
-                    controller: _usernameController,
-                    enabled: fieldsEnabled,
-                    textCapitalization: TextCapitalization.characters,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Username',
-                      hintText: _allowedUsername,
-                      prefixIcon: Icon(Icons.person_outline),
+                  if (!_otpStep) ...[
+                    TextFormField(
+                      controller: _usernameController,
+                      enabled: !_isLoading,
+                      textCapitalization: TextCapitalization.characters,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      decoration: const InputDecoration(
+                        labelText: 'Username',
+                        hintText: _allowedUsername,
+                        prefixIcon: Icon(Icons.person_outline),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Username is required';
+                        }
+                        if (value.trim().toUpperCase() != _allowedUsername) {
+                          return 'Invalid username';
+                        }
+                        return null;
+                      },
                     ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) {
-                        return 'Username is required';
-                      }
-                      if (value.trim().toUpperCase() != _allowedUsername) {
-                        return 'Invalid username';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _passwordController,
-                    enabled: fieldsEnabled,
-                    obscureText: _obscurePassword,
-                    textInputAction: TextInputAction.done,
-                    onFieldSubmitted: (_) => _signIn(),
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      suffixIcon: IconButton(
-                        onPressed: fieldsEnabled
-                            ? () => setState(
-                                  () => _obscurePassword =
-                                      !_obscurePassword,
-                                )
-                            : null,
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _passwordController,
+                      enabled: !_isLoading,
+                      obscureText: _obscurePassword,
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) => _signInAndSendOtp(),
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          onPressed: _isLoading
+                              ? null
+                              : () => setState(
+                                    () => _obscurePassword =
+                                        !_obscurePassword,
+                                  ),
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
                         ),
                       ),
+                      validator: (value) => value == null || value.isEmpty
+                          ? 'Password is required'
+                          : null,
                     ),
-                    validator: (value) => value == null || value.isEmpty
-                        ? 'Password is required'
-                        : null,
-                  ),
+                  ] else ...[
+                    Text(
+                      'أدخل كود التحقق المرسل إلى بريد المالك',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _otpController,
+                      enabled: !_isLoading,
+                      autofocus: true,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _verifyOtp(),
+                      maxLength: 6,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 8,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'OTP',
+                        hintText: '000000',
+                        prefixIcon: Icon(Icons.mark_email_read_outlined),
+                        counterText: '',
+                      ),
+                    ),
+                  ],
                   if (_statusMessage != null) ...[
                     const SizedBox(height: 18),
                     Card(
@@ -382,7 +446,7 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (_waitingForApproval)
+                            if (_isLoading)
                               const Padding(
                                 padding: EdgeInsets.only(top: 2),
                                 child: SizedBox(
@@ -405,8 +469,7 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                               child: Text(
                                 _statusMessage!,
                                 style: TextStyle(
-                                  color:
-                                      _statusIsError ? Colors.red : null,
+                                  color: _statusIsError ? Colors.red : null,
                                 ),
                               ),
                             ),
@@ -416,30 +479,37 @@ class _GeneratorLoginScreenState extends State<_GeneratorLoginScreen> {
                     ),
                   ],
                   const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: fieldsEnabled ? _signIn : null,
-                    icon: _isLoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child:
-                                CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.login),
-                    label: Text(
-                      _isLoading
-                          ? 'جارٍ تسجيل الدخول...'
-                          : _waitingForApproval
-                              ? 'بانتظار الموافقة...'
-                              : 'تسجيل الدخول',
+                  if (!_otpStep)
+                    FilledButton.icon(
+                      onPressed: _isLoading ? null : _signInAndSendOtp,
+                      icon: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.login),
+                      label: Text(
+                        _isLoading ? 'جارٍ التحقق...' : 'تسجيل الدخول وإرسال الكود',
+                      ),
+                    )
+                  else ...[
+                    FilledButton.icon(
+                      onPressed: _isLoading ? null : _verifyOtp,
+                      icon: _isLoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.verified_user_outlined),
+                      label: Text(_isLoading ? 'جارٍ التحقق...' : 'تحقق وافتح المولد'),
                     ),
-                  ),
-                  if (_waitingForApproval) ...[
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     OutlinedButton.icon(
-                      onPressed: _cancelRequest,
-                      icon: const Icon(Icons.close),
-                      label: const Text('إلغاء الطلب'),
+                      onPressed: _isLoading ? null : () => _resetLogin(),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('إرسال كود جديد'),
                     ),
                   ],
                 ],

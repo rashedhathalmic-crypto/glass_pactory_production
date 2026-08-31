@@ -8,7 +8,7 @@ void showGeneratorLoginNotification({
 Future<Map<String, dynamic>> checkGeneratorApprovalService() async {
   return {
     'status': 'unsupported',
-    'message': 'نظام الموافقة متاح في نسخة الويب فقط.',
+    'message': 'نظام OTP متاح في نسخة الويب فقط.',
   };
 }
 
@@ -19,7 +19,19 @@ Future<Map<String, dynamic>> createGeneratorAccessRequest({
 }) async {
   return {
     'status': 'unsupported',
-    'message': 'نظام الموافقة متاح في نسخة الويب فقط.',
+    'message': 'نظام OTP متاح في نسخة الويب فقط.',
+  };
+}
+
+Future<Map<String, dynamic>> verifyGeneratorAccessOtp({
+  required String requestId,
+  required String pollToken,
+  required String otp,
+  required String idToken,
+}) async {
+  return {
+    'status': 'unsupported',
+    'message': 'نظام OTP متاح في نسخة الويب فقط.',
   };
 }
 
@@ -29,19 +41,15 @@ Future<Map<String, dynamic>> pollGeneratorAccessRequest({
 }) async {
   return {
     'status': 'unsupported',
-    'message': 'نظام الموافقة متاح في نسخة الويب فقط.',
+    'message': 'نظام OTP متاح في نسخة الويب فقط.',
   };
 }
 
 DateTime? readGeneratorApprovalExpiry() => null;
-
 void saveGeneratorApprovalExpiry(DateTime approvedUntil) {}
-
 void clearGeneratorApproval() {}
 
 Future<bool> sendGeneratorLoginEmail({
   required String username,
   required String accountEmail,
-}) async {
-  return false;
-}
+}) async => false;

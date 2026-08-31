@@ -31,7 +31,11 @@ jobs:
         run: flutter pub get
 
       - name: Build web
-        run: flutter build web --release --base-href "/glass_pactory_production/"
+        run: >-
+          flutter build web
+          --release
+          --base-href "/glass_pactory_production/"
+          --dart-define=ACCESS_APPROVAL_URL=https://script.google.com/macros/s/AKfycbwuTIRuDH8hFLw60DvR3ZMfmog5BtSXiCVXvD3KIy63Uh9Tmq6a2WIlYUNwB0FN41pnXg/exec
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

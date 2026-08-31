@@ -29,10 +29,32 @@ jobs:
       - name: Build web
         run: flutter build web --release --base-href "/glass_pactory_production/"
 
-      - name: Verify approval service
+      - name: Verify password plus owner-email OTP flow
         shell: bash
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --location --max-time 20 'https://script.google.com/macros/s/AKfycbxwidW-HceCIzOnF8jNx3Ewl5tkKvtjHDRNni75mbGi/exec?action=health')"
+          grep -q "rashedhathalmic@gmail.com" lib/main.dart
+          grep -q "signInWithEmailAndPassword" lib/main.dart
+          grep -q "createGeneratorAccessRequest" lib/main.dart
+          grep -q "verifyGeneratorAccessOtp" lib/main.dart
+          grep -q "Persistence.NONE" lib/main.dart
+          grep -q "requestOtp" lib/core/helpers/generator_login_alert_web.dart
+          grep -q "verifyOtp" lib/core/helpers/generator_login_alert_web.dart
+          grep -q "verifyFirebaseIdToken_" apps_script/generator_access_otp.gs
+          grep -q "MailApp.sendEmail" apps_script/generator_access_otp.gs
+          grep -q "MAX_OTP_ATTEMPTS = 5" apps_script/generator_access_otp.gs
+          grep -q "OTP_TTL_SECONDS = 600" apps_script/generator_access_otp.gs
+          if grep -q "sendSignInLinkToEmail" lib/main.dart; then
+            echo "Passwordless email-link flow must not be present"
+            exit 1
+          fi
+
+      - name: Verify deployed OTP backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --location --max-time 25 'https://script.google.com/macros/s/AKfycbwuTIRuDH8hFLw60DvR3ZMfmog5BtSXiCVXvD3KIy63Uh9Tmq6a2WIlYUNwB0FN41pnXg/exec?action=health')"
           echo "$response"
-          echo "$response" | grep -q '"ok":true'
+          echo "$response" | grep -q '"status":"healthy"'
+          echo "$response" | grep -q '"version":"email-otp-v2"'
+          echo "$response" | grep -q '"owner":"rashedhathalmic@gmail.com"'
