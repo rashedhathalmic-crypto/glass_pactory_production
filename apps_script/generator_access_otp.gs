@@ -6,7 +6,8 @@ const MAX_OTP_REQUESTS_PER_15_MINUTES = 5;
 const SERVICE_VERSION = 'email-otp-v2';
 
 function doGet(e) {
-  const action = String((e && e.parameter && e.parameter.action) || 'health');
+  const params = (e && e.parameter) || {};
+  const action = String(params.action || 'health');
   let result;
 
   if (action === 'health') {
@@ -17,47 +18,34 @@ function doGet(e) {
       owner: OWNER_EMAIL,
     };
   } else if (action === 'poll') {
-    result = pollRequest_(e.parameter || {});
+    result = pollRequest_(params);
   } else {
     result = {status: 'error', message: 'Unsupported action.'};
   }
 
-  const storageKey = String((e && e.parameter && e.parameter.storageKey) || '');
+  const storageKey = String(params.storageKey || '');
   return storageKey ? scriptResponse_(storageKey, result) : jsonResponse_(result);
 }
 
 function doPost(e) {
   const params = (e && e.parameter) || {};
-  const action = String(params.action || '');
-  let result;
-
   try {
-    if (action === 'requestOtp') {
-      result = requestOtp_(params);
-    } else if (action === 'verifyOtp') {
-      result = verifyOtp_(params);
-    } else {
-      result = {status: 'error', message: 'Unsupported action.'};
-    }
+    if (params.action === 'requestOtp') return jsonResponse_(requestOtp_(params));
+    if (params.action === 'verifyOtp') return jsonResponse_(verifyOtp_(params));
+    return jsonResponse_({status: 'error', message: 'Unsupported action.'});
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
-    result = {
+    return jsonResponse_({
       status: 'error',
       message: 'OTP service failed to process the request.',
-    };
+    });
   }
-
-  return jsonResponse_(result);
 }
 
 function requestOtp_(params) {
   const requestId = cleanRequestId_(params.requestId);
   const pollToken = cleanPollToken_(params.pollToken);
   const idToken = String(params.idToken || '');
-  const requesterName = cleanText_(params.requesterName, 80);
-  const tool = cleanText_(params.tool, 120);
-  const device = cleanText_(params.device, 500);
-
   if (!requestId || !pollToken || !idToken) {
     return {status: 'error', message: 'Invalid OTP request.'};
   }
@@ -76,15 +64,12 @@ function requestOtp_(params) {
     };
   }
 
-  const cache = CacheService.getScriptCache();
-  const existing = cache.get(requestKey_(requestId));
-  if (existing) {
+  if (loadRecord_(requestId)) {
     return {status: 'error', message: 'Duplicate OTP request.'};
   }
 
   const now = Date.now();
   const otp = generateOtp_();
-  const expiresAt = now + OTP_TTL_SECONDS * 1000;
   const record = {
     version: SERVICE_VERSION,
     uid: auth.uid,
@@ -94,16 +79,15 @@ function requestOtp_(params) {
     status: 'otp_sent',
     attempts: 0,
     createdAt: now,
-    expiresAt: expiresAt,
-    requesterName: requesterName,
-    tool: tool,
-    device: device,
+    expiresAt: now + OTP_TTL_SECONDS * 1000,
+    requesterName: cleanText_(params.requesterName, 80),
+    tool: cleanText_(params.tool, 120),
+    device: cleanText_(params.device, 500),
     lastAttemptId: '',
     message: 'OTP sent to owner email.',
   };
 
   saveRecord_(requestId, record);
-
   try {
     sendOtpEmail_(otp, record);
   } catch (error) {
@@ -116,8 +100,8 @@ function requestOtp_(params) {
 
   return {
     status: 'otp_sent',
-    expiresAt: expiresAt,
-    message: 'OTP sent to owner email.',
+    expiresAt: record.expiresAt,
+    message: record.message,
   };
 }
 
@@ -127,96 +111,99 @@ function verifyOtp_(params) {
   const otp = String(params.otp || '').trim();
   const idToken = String(params.idToken || '');
   const attemptId = cleanAttemptId_(params.attemptId);
-
   if (!requestId || !pollToken || !/^\d{6}$/.test(otp) || !idToken || !attemptId) {
     return {status: 'error', message: 'Invalid OTP verification request.'};
   }
 
-  const record = loadRecord_(requestId);
-  if (!record) {
-    return {status: 'expired', message: 'OTP request expired.'};
-  }
-  if (!constantEquals_(record.pollHash, secureHash_(pollToken))) {
-    return {status: 'unauthorized', message: 'OTP request token is invalid.'};
-  }
-
-  if (Date.now() >= Number(record.expiresAt || 0)) {
-    record.status = 'expired';
-    record.message = 'OTP expired.';
-    record.lastAttemptId = attemptId;
-    saveRecord_(requestId, record);
-    return {status: 'expired', message: record.message};
-  }
-
+  // Verify the Firebase password session before entering the critical section.
   const auth = verifyFirebaseIdToken_(idToken);
-  if (!auth.ok ||
-      auth.uid !== record.uid ||
-      auth.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
-    record.status = 'unauthorized';
-    record.message = 'Password session no longer matches this OTP request.';
+  if (!auth.ok || auth.email.toLowerCase() !== OWNER_EMAIL.toLowerCase()) {
+    return {status: 'unauthorized', message: 'Password session was not accepted.'};
+  }
+
+  // Calculate hashes before taking the lock so attempt accounting stays fast.
+  const pollHash = secureHash_(pollToken);
+  const suppliedOtpHash = secureHash_(requestId + '|' + otp);
+
+  // All reads/checks/increments/writes for an OTP attempt are serialized.
+  // Parallel guesses therefore consume separate attempts and cannot bypass
+  // MAX_OTP_ATTEMPTS by racing the cache update.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(5000);
+  try {
+    const record = loadRecord_(requestId);
+    if (!record) {
+      return {status: 'expired', message: 'OTP request expired.'};
+    }
+    if (!constantEquals_(record.pollHash, pollHash)) {
+      return {status: 'unauthorized', message: 'OTP request token is invalid.'};
+    }
+    if (auth.uid !== record.uid) {
+      record.status = 'unauthorized';
+      record.message = 'Password session does not match this OTP request.';
+      record.lastAttemptId = attemptId;
+      saveRecord_(requestId, record);
+      return {status: 'unauthorized', message: record.message};
+    }
+    if (Date.now() >= Number(record.expiresAt || 0)) {
+      record.status = 'expired';
+      record.message = 'OTP expired.';
+      record.lastAttemptId = attemptId;
+      saveRecord_(requestId, record);
+      return {status: 'expired', message: record.message};
+    }
+    if (record.status === 'approved') {
+      record.lastAttemptId = attemptId;
+      saveRecord_(requestId, record);
+      return {status: 'approved', message: 'Password and OTP verified.'};
+    }
+    if (Number(record.attempts || 0) >= MAX_OTP_ATTEMPTS) {
+      record.status = 'locked';
+      record.message = 'OTP request locked.';
+      record.lastAttemptId = attemptId;
+      saveRecord_(requestId, record);
+      return {status: 'locked', message: record.message};
+    }
+
     record.lastAttemptId = attemptId;
+    if (!constantEquals_(record.otpHash, suppliedOtpHash)) {
+      record.attempts = Number(record.attempts || 0) + 1;
+      const remaining = Math.max(0, MAX_OTP_ATTEMPTS - record.attempts);
+      record.status = remaining > 0 ? 'invalid_otp' : 'locked';
+      record.message = remaining > 0 ? 'Incorrect OTP.' : 'OTP request locked.';
+      saveRecord_(requestId, record);
+      return {
+        status: record.status,
+        message: record.message,
+        attemptsRemaining: remaining,
+      };
+    }
+
+    record.status = 'approved';
+    record.message = 'Password and OTP verified.';
+    record.otpHash = '';
+    record.approvedAt = Date.now();
     saveRecord_(requestId, record);
-    return {status: 'unauthorized', message: record.message};
+    return {status: 'approved', message: record.message};
+  } finally {
+    lock.releaseLock();
   }
-
-  if (Number(record.attempts || 0) >= MAX_OTP_ATTEMPTS) {
-    record.status = 'locked';
-    record.message = 'OTP request locked.';
-    record.lastAttemptId = attemptId;
-    saveRecord_(requestId, record);
-    return {status: 'locked', message: record.message};
-  }
-
-  const expected = record.otpHash;
-  const supplied = secureHash_(requestId + '|' + otp);
-  record.lastAttemptId = attemptId;
-
-  if (!constantEquals_(expected, supplied)) {
-    record.attempts = Number(record.attempts || 0) + 1;
-    const remaining = Math.max(0, MAX_OTP_ATTEMPTS - record.attempts);
-    record.status = remaining > 0 ? 'invalid_otp' : 'locked';
-    record.message = remaining > 0 ? 'Incorrect OTP.' : 'OTP request locked.';
-    saveRecord_(requestId, record);
-    return {
-      status: record.status,
-      message: record.message,
-      attemptsRemaining: remaining,
-    };
-  }
-
-  record.status = 'approved';
-  record.message = 'Password and OTP verified.';
-  record.otpHash = '';
-  record.approvedAt = Date.now();
-  saveRecord_(requestId, record);
-
-  return {
-    status: 'approved',
-    message: record.message,
-  };
 }
 
 function pollRequest_(params) {
   const requestId = cleanRequestId_(params.id);
   const pollToken = cleanPollToken_(params.token);
   const expectedAttempt = cleanAttemptId_(params.attempt || '');
-
-  if (!requestId || !pollToken) {
-    return {status: 'invalid'};
-  }
+  if (!requestId || !pollToken) return {status: 'invalid'};
 
   const record = loadRecord_(requestId);
-  if (!record) {
-    return {status: 'invalid'};
-  }
+  if (!record) return {status: 'invalid'};
   if (!constantEquals_(record.pollHash, secureHash_(pollToken))) {
     return {status: 'unauthorized'};
   }
-
   if (Date.now() >= Number(record.expiresAt || 0) && record.status !== 'approved') {
     return {status: 'expired', message: 'OTP expired.'};
   }
-
   if (expectedAttempt && record.lastAttemptId !== expectedAttempt) {
     return {status: 'pending'};
   }
@@ -225,10 +212,7 @@ function pollRequest_(params) {
     status: record.status || 'pending',
     message: record.message || '',
     expiresAt: Number(record.expiresAt || 0),
-    attemptsRemaining: Math.max(
-      0,
-      MAX_OTP_ATTEMPTS - Number(record.attempts || 0)
-    ),
+    attemptsRemaining: Math.max(0, MAX_OTP_ATTEMPTS - Number(record.attempts || 0)),
   };
 }
 
@@ -244,22 +228,11 @@ function verifyFirebaseIdToken_(idToken) {
         muteHttpExceptions: true,
       }
     );
-
-    if (response.getResponseCode() !== 200) {
-      return {ok: false};
-    }
-
+    if (response.getResponseCode() !== 200) return {ok: false};
     const payload = JSON.parse(response.getContentText() || '{}');
     const user = payload.users && payload.users[0];
-    if (!user || !user.localId || !user.email) {
-      return {ok: false};
-    }
-
-    return {
-      ok: true,
-      uid: String(user.localId),
-      email: String(user.email),
-    };
+    if (!user || !user.localId || !user.email) return {ok: false};
+    return {ok: true, uid: String(user.localId), email: String(user.email)};
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
     return {ok: false};
@@ -275,16 +248,13 @@ function consumeRequestRate_(uid) {
     const raw = cache.get(key);
     let data = raw ? JSON.parse(raw) : {count: 0, startedAt: Date.now()};
     const age = Date.now() - Number(data.startedAt || 0);
-    if (age >= 15 * 60 * 1000) {
-      data = {count: 0, startedAt: Date.now()};
-    }
+    if (age >= 15 * 60 * 1000) data = {count: 0, startedAt: Date.now()};
 
     if (Number(data.count || 0) >= MAX_OTP_REQUESTS_PER_15_MINUTES) {
-      const retryAfter = Math.max(
-        1,
-        Math.ceil((15 * 60 * 1000 - age) / 1000)
-      );
-      return {allowed: false, retryAfter: retryAfter};
+      return {
+        allowed: false,
+        retryAfter: Math.max(1, Math.ceil((15 * 60 * 1000 - age) / 1000)),
+      };
     }
 
     data.count = Number(data.count || 0) + 1;
@@ -313,8 +283,8 @@ function sendOtpEmail_(otp, record) {
     '<div style="font-family:Arial,sans-serif;max-width:560px">' +
     '<h2>Glass CNC Tools</h2>' +
     '<p>A login attempt is waiting for your approval.</p>' +
-    '<div style="font-size:34px;font-weight:700;letter-spacing:8px;' +
-    'padding:16px 0">' + otp + '</div>' +
+    '<div style="font-size:34px;font-weight:700;letter-spacing:8px;padding:16px 0">' +
+    otp + '</div>' +
     '<p><b>Expires:</b> 10 minutes</p>' +
     '<p><b>User:</b> ' + escapeHtml_(record.requesterName || '-') + '</p>' +
     '<p><b>Tool:</b> ' + escapeHtml_(record.tool || '-') + '</p>' +
@@ -343,9 +313,8 @@ function generateOtp_() {
     entropy,
     Utilities.Charset.UTF_8
   );
-  const firstFourBytes = digest.slice(0, 4);
   let value = 0;
-  firstFourBytes.forEach(function(byte) {
+  digest.slice(0, 4).forEach(function(byte) {
     value = (value * 256 + ((byte + 256) % 256)) >>> 0;
   });
   return String(value % 1000000).padStart(6, '0');
@@ -362,48 +331,39 @@ function saveRecord_(requestId, record) {
 function loadRecord_(requestId) {
   const raw = CacheService.getScriptCache().get(requestKey_(requestId));
   if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    return null;
-  }
+  try { return JSON.parse(raw); } catch (error) { return null; }
 }
 
-function requestKey_(requestId) {
-  return 'otp:' + requestId;
-}
+function requestKey_(requestId) { return 'otp:' + requestId; }
 
 function secureHash_(value) {
-  const pepper = getPepper_();
   const digest = Utilities.computeDigest(
     Utilities.DigestAlgorithm.SHA_256,
-    String(value) + '|' + pepper,
+    String(value) + '|' + getPepper_(),
     Utilities.Charset.UTF_8
   );
-  return digest
-    .map(function(byte) {
-      return ((byte + 256) % 256).toString(16).padStart(2, '0');
-    })
-    .join('');
+  return digest.map(function(byte) {
+    return ((byte + 256) % 256).toString(16).padStart(2, '0');
+  }).join('');
 }
 
 function getPepper_() {
   const properties = PropertiesService.getScriptProperties();
   let pepper = properties.getProperty('OTP_PEPPER');
-  if (!pepper) {
-    const lock = LockService.getScriptLock();
-    lock.waitLock(5000);
-    try {
-      pepper = properties.getProperty('OTP_PEPPER');
-      if (!pepper) {
-        pepper = Utilities.getUuid() + Utilities.getUuid() + Utilities.getUuid();
-        properties.setProperty('OTP_PEPPER', pepper);
-      }
-    } finally {
-      lock.releaseLock();
+  if (pepper) return pepper;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(5000);
+  try {
+    pepper = properties.getProperty('OTP_PEPPER');
+    if (!pepper) {
+      pepper = Utilities.getUuid() + Utilities.getUuid() + Utilities.getUuid();
+      properties.setProperty('OTP_PEPPER', pepper);
     }
+    return pepper;
+  } finally {
+    lock.releaseLock();
   }
-  return pepper;
 }
 
 function constantEquals_(left, right) {
@@ -455,10 +415,11 @@ function jsonResponse_(payload) {
 }
 
 function scriptResponse_(storageKey, payload) {
-  const keyJson = JSON.stringify(String(storageKey));
-  const payloadJson = JSON.stringify(JSON.stringify(payload));
   const script =
-    '(function(){try{localStorage.setItem(' + keyJson + ',' + payloadJson + ');}catch(e){}})();';
+    '(function(){try{localStorage.setItem(' +
+    JSON.stringify(String(storageKey)) + ',' +
+    JSON.stringify(JSON.stringify(payload)) +
+    ');}catch(e){}})();';
   return ContentService.createTextOutput(script)
     .setMimeType(ContentService.MimeType.JAVASCRIPT);
 }
