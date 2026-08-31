@@ -29,10 +29,19 @@ jobs:
       - name: Build web
         run: flutter build web --release --base-href "/glass_pactory_production/"
 
-      - name: Verify approval service
+      - name: Verify owner-controlled email access flow
         shell: bash
         run: |
           set -euo pipefail
-          response="$(curl --fail --silent --show-error --location --max-time 20 'https://script.google.com/macros/s/AKfycbxwidW-HceCIzOnF8jNx3Ewl5tkKvtjHDRNni75mbGi/exec?action=health')"
-          echo "$response"
-          echo "$response" | grep -q '"ok":true'
+          grep -q "rashedhathalmic@gmail.com" lib/main.dart
+          grep -q "sendSignInLinkToEmail" lib/main.dart
+          grep -q "signInWithEmailLink" lib/main.dart
+          grep -q "Persistence.SESSION" lib/main.dart
+          if grep -q "createGeneratorAccessRequest" lib/main.dart; then
+            echo "Legacy Apps Script approval is still referenced by main.dart"
+            exit 1
+          fi
+          if grep -q "pollGeneratorAccessRequest" lib/main.dart; then
+            echo "Legacy Apps Script polling is still referenced by main.dart"
+            exit 1
+          fi
