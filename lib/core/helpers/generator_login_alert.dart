@@ -28,6 +28,20 @@ Future<Map<String, dynamic>> createGeneratorAccessRequest({
   );
 }
 
+Future<Map<String, dynamic>> verifyGeneratorAccessOtp({
+  required String requestId,
+  required String pollToken,
+  required String otp,
+  required String idToken,
+}) {
+  return impl.verifyGeneratorAccessOtp(
+    requestId: requestId,
+    pollToken: pollToken,
+    otp: otp,
+    idToken: idToken,
+  );
+}
+
 Future<Map<String, dynamic>> pollGeneratorAccessRequest({
   required String requestId,
   required String pollToken,
@@ -38,20 +52,12 @@ Future<Map<String, dynamic>> pollGeneratorAccessRequest({
   );
 }
 
-DateTime? readGeneratorApprovalExpiry() {
-  return impl.readGeneratorApprovalExpiry();
-}
+// Approval persistence is intentionally disabled for the OTP flow. A fresh
+// password + OTP is required after every page reload/new browser session.
+DateTime? readGeneratorApprovalExpiry() => null;
+void saveGeneratorApprovalExpiry(DateTime approvedUntil) {}
+void clearGeneratorApproval() {}
 
-void saveGeneratorApprovalExpiry(DateTime approvedUntil) {
-  impl.saveGeneratorApprovalExpiry(approvedUntil);
-}
-
-void clearGeneratorApproval() {
-  impl.clearGeneratorApproval();
-}
-
-// Kept for source compatibility. Login email is now sent by the approval
-// service, not by an unauthenticated third-party form endpoint.
 Future<bool> sendGeneratorLoginEmail({
   required String username,
   required String accountEmail,
