@@ -12,15 +12,13 @@ const _approvalServiceUrl = String.fromEnvironment(
   'ACCESS_APPROVAL_URL',
   defaultValue: _defaultApprovalServiceUrl,
 );
-const _approvalUntilKey = 'glass_cnc_access_approved_until';
-const _requestDecisionWindow = Duration(minutes: 30);
+const _otpLifetime = Duration(minutes: 10);
 
 Future<bool> requestGeneratorNotificationPermission() async {
   try {
     if (!html.Notification.supported) return false;
     if (html.Notification.permission == 'granted') return true;
-    final permission = await html.Notification.requestPermission();
-    return permission == 'granted';
+    return await html.Notification.requestPermission() == 'granted';
   } on Object {
     return false;
   }
@@ -31,13 +29,12 @@ void showGeneratorLoginNotification({
   required String body,
 }) {
   try {
-    if (!html.Notification.supported ||
-        html.Notification.permission != 'granted') {
-      return;
+    if (html.Notification.supported &&
+        html.Notification.permission == 'granted') {
+      html.Notification(title, body: body);
     }
-    html.Notification(title, body: body);
   } on Object {
-    // Notifications are optional and must never block approved access.
+    // Notifications are optional.
   }
 }
 
@@ -50,68 +47,23 @@ String _randomHex(int byteCount) {
   return buffer.toString();
 }
 
-void _addHiddenField(
-  html.FormElement form,
-  String name,
-  String value,
-) {
-  final input = html.InputElement()
-    ..type = 'hidden'
-    ..name = name
-    ..value = value;
-  form.children.add(input);
-}
-
-Future<Map<String, dynamic>> checkGeneratorApprovalService() async {
-  if (!_approvalServiceUrl.startsWith('https://') ||
-      !_approvalServiceUrl.endsWith('/exec')) {
-    return {
-      'status': 'error',
-      'message':
-          'رابط خدمة الموافقة غير صحيح. يجب أن يكون رابط نشر Google وينتهي بـ /exec.',
-    };
-  }
-
-  final result = await pollGeneratorAccessRequest(
-    requestId:
-        'health_${DateTime.now().millisecondsSinceEpoch}_${_randomHex(8)}',
-    pollToken: _randomHex(32),
+void _addHiddenField(html.FormElement form, String name, String value) {
+  form.children.add(
+    html.InputElement()
+      ..type = 'hidden'
+      ..name = name
+      ..value = value,
   );
-  final status = result['status']?.toString() ?? 'error';
-  if (status == 'invalid') {
-    return {'status': 'healthy'};
-  }
-
-  return {
-    'status': 'error',
-    'message': result['message']?.toString() ??
-        'خدمة الموافقة غير منشورة أو أن رابط /exec غير صالح.',
-  };
 }
 
-Future<Map<String, dynamic>> createGeneratorAccessRequest({
-  required String requesterName,
-  required String idToken,
-  required String tool,
-}) async {
-  final service = await checkGeneratorApprovalService();
-  if (service['status'] != 'healthy') return service;
-
+Future<void> _submitHiddenForm(Map<String, String> fields) async {
   final body = html.document.body;
   if (body == null) {
-    return {
-      'status': 'error',
-      'message': 'تعذر فتح خدمة الموافقة في المتصفح.',
-    };
+    throw StateError('Document body unavailable');
   }
 
-  final now = DateTime.now();
-  final requestId =
-      'req_${now.millisecondsSinceEpoch}_${_randomHex(12)}';
-  final pollToken = _randomHex(32);
   final frameName =
-      'glass_cnc_access_${now.microsecondsSinceEpoch}_${_randomHex(4)}';
-
+      'glass_cnc_otp_${DateTime.now().microsecondsSinceEpoch}_${_randomHex(4)}';
   final iframe = html.IFrameElement()
     ..name = frameName
     ..style.display = 'none';
@@ -121,67 +73,41 @@ Future<Map<String, dynamic>> createGeneratorAccessRequest({
     ..target = frameName
     ..style.display = 'none';
 
-  _addHiddenField(form, 'action', 'request');
-  _addHiddenField(form, 'requestId', requestId);
-  _addHiddenField(form, 'pollToken', pollToken);
-  _addHiddenField(form, 'requesterName', requesterName);
-  _addHiddenField(form, 'tool', tool);
-  _addHiddenField(form, 'idToken', idToken);
-  _addHiddenField(
-    form,
-    'device',
-    html.window.navigator.userAgent,
-  );
+  for (final entry in fields.entries) {
+    _addHiddenField(form, entry.key, entry.value);
+  }
 
-  body.children.add(iframe);
-  body.children.add(form);
+  body.children
+    ..add(iframe)
+    ..add(form);
 
   try {
     form.submit();
-    // Cross-origin form submission cannot expose the response to Dart.
-    // Polling below verifies that the server accepted and stored the request.
-    await Future<void>.delayed(const Duration(milliseconds: 1500));
-    return {
-      'status': 'submitted',
-      'requestId': requestId,
-      'pollToken': pollToken,
-      'expiresAt': now
-          .add(_requestDecisionWindow)
-          .millisecondsSinceEpoch,
-    };
-  } on Object {
-    return {
-      'status': 'error',
-      'message': 'تعذر إرسال طلب الموافقة.',
-    };
+    await Future<void>.delayed(const Duration(milliseconds: 650));
   } finally {
     form.remove();
     iframe.remove();
   }
 }
 
-Future<Map<String, dynamic>> pollGeneratorAccessRequest({
-  required String requestId,
-  required String pollToken,
-}) async {
+Future<Map<String, dynamic>> _serviceQuery(
+  Map<String, String> queryParameters,
+) async {
   final body = html.document.body;
   if (body == null) {
     return {
       'status': 'error',
-      'message': 'تعذر قراءة حالة طلب الموافقة.',
+      'message': 'تعذر قراءة استجابة خدمة OTP.',
     };
   }
 
   final storageKey =
-      'glass_cnc_poll_${DateTime.now().microsecondsSinceEpoch}_'
-      '${_randomHex(4)}';
+      'glass_cnc_otp_${DateTime.now().microsecondsSinceEpoch}_${_randomHex(4)}';
   html.window.localStorage.remove(storageKey);
 
   final uri = Uri.parse(_approvalServiceUrl).replace(
     queryParameters: {
-      'action': 'poll',
-      'id': requestId,
-      'token': pollToken,
+      ...queryParameters,
       'storageKey': storageKey,
       '_': DateTime.now().millisecondsSinceEpoch.toString(),
     },
@@ -200,9 +126,7 @@ Future<Map<String, dynamic>> pollGeneratorAccessRequest({
   });
   errorSubscription = script.onError.listen((_) {
     if (!loaded.isCompleted) {
-      loaded.completeError(
-        StateError('Approval polling script failed to load'),
-      );
+      loaded.completeError(StateError('OTP service script failed to load'));
     }
   });
 
@@ -215,7 +139,7 @@ Future<Map<String, dynamic>> pollGeneratorAccessRequest({
       return {
         'status': 'error',
         'message':
-            'خدمة الموافقة غير منشورة أو أن رابط Google /exec غير صالح.',
+            'خدمة OTP غير منشورة أو رابط Google Apps Script غير صحيح.',
       };
     }
 
@@ -223,26 +147,19 @@ Future<Map<String, dynamic>> pollGeneratorAccessRequest({
     if (decoded is! Map) {
       return {
         'status': 'error',
-        'message': 'استجابة خدمة الموافقة غير صحيحة.',
+        'message': 'استجابة خدمة OTP غير صحيحة.',
       };
     }
-
-    final result = Map<String, dynamic>.from(decoded);
-    final status = result['status']?.toString() ?? 'error';
-    return {
-      ...result,
-      'status': status,
-    };
+    return Map<String, dynamic>.from(decoded);
   } on TimeoutException {
     return {
       'status': 'error',
-      'message': 'انتهت مهلة الاتصال بخدمة الموافقة.',
+      'message': 'انتهت مهلة الاتصال بخدمة OTP.',
     };
   } on Object {
     return {
       'status': 'error',
-      'message':
-          'تعذر الاتصال بخدمة الموافقة. تأكد من نشر Google Script كرابط /exec.',
+      'message': 'تعذر الاتصال بخدمة OTP.',
     };
   } finally {
     await loadSubscription.cancel();
@@ -252,44 +169,156 @@ Future<Map<String, dynamic>> pollGeneratorAccessRequest({
   }
 }
 
-DateTime? readGeneratorApprovalExpiry() {
-  try {
-    final raw = html.window.localStorage[_approvalUntilKey];
-    final milliseconds = int.tryParse(raw ?? '');
-    if (milliseconds == null) return null;
+Future<Map<String, dynamic>> checkGeneratorApprovalService() async {
+  if (!_approvalServiceUrl.startsWith('https://') ||
+      !_approvalServiceUrl.endsWith('/exec')) {
+    return {
+      'status': 'error',
+      'message': 'رابط خدمة OTP غير صحيح.',
+    };
+  }
 
-    final approvedUntil =
-        DateTime.fromMillisecondsSinceEpoch(milliseconds);
-    if (!approvedUntil.isAfter(DateTime.now())) {
-      clearGeneratorApproval();
-      return null;
+  final result = await _serviceQuery({'action': 'health'});
+  if (result['status'] == 'healthy' && result['version'] == 'email-otp-v2') {
+    return result;
+  }
+  return {
+    'status': 'error',
+    'message': result['message']?.toString() ??
+        'خدمة OTP تحتاج نشر الإصدار email-otp-v2.',
+  };
+}
+
+Future<Map<String, dynamic>> createGeneratorAccessRequest({
+  required String requesterName,
+  required String idToken,
+  required String tool,
+}) async {
+  final health = await checkGeneratorApprovalService();
+  if (health['status'] != 'healthy') return health;
+
+  final now = DateTime.now();
+  final requestId =
+      'req_${now.millisecondsSinceEpoch}_${_randomHex(12)}';
+  final pollToken = _randomHex(32);
+
+  try {
+    await _submitHiddenForm({
+      'action': 'requestOtp',
+      'requestId': requestId,
+      'pollToken': pollToken,
+      'requesterName': requesterName,
+      'tool': tool,
+      'idToken': idToken,
+      'device': html.window.navigator.userAgent,
+    });
+
+    final deadline = now.add(const Duration(seconds: 15));
+    while (DateTime.now().isBefore(deadline)) {
+      final status = await pollGeneratorAccessRequest(
+        requestId: requestId,
+        pollToken: pollToken,
+      );
+      final code = status['status']?.toString() ?? 'error';
+      if (code == 'otp_sent') {
+        return {
+          'status': 'submitted',
+          'requestId': requestId,
+          'pollToken': pollToken,
+          'expiresAt': status['expiresAt'] ??
+              now.add(_otpLifetime).millisecondsSinceEpoch,
+          'message': status['message'],
+        };
+      }
+      if (code == 'pending' || code == 'invalid') {
+        await Future<void>.delayed(const Duration(milliseconds: 550));
+        continue;
+      }
+      return status;
     }
-    return approvedUntil;
+
+    return {
+      'status': 'error',
+      'message': 'لم تؤكد خدمة OTP إرسال الكود. حاول مرة أخرى.',
+    };
   } on Object {
-    return null;
+    return {
+      'status': 'error',
+      'message': 'تعذر إرسال طلب OTP.',
+    };
   }
 }
 
-void saveGeneratorApprovalExpiry(DateTime approvedUntil) {
+Future<Map<String, dynamic>> verifyGeneratorAccessOtp({
+  required String requestId,
+  required String pollToken,
+  required String otp,
+  required String idToken,
+}) async {
+  final cleanOtp = otp.trim();
+  if (!RegExp(r'^\d{6}$').hasMatch(cleanOtp)) {
+    return {
+      'status': 'invalid_otp',
+      'message': 'أدخل كودًا مكونًا من 6 أرقام.',
+    };
+  }
+
   try {
-    html.window.localStorage[_approvalUntilKey] =
-        approvedUntil.millisecondsSinceEpoch.toString();
+    await _submitHiddenForm({
+      'action': 'verifyOtp',
+      'requestId': requestId,
+      'pollToken': pollToken,
+      'otp': cleanOtp,
+      'idToken': idToken,
+    });
+
+    final deadline = DateTime.now().add(const Duration(seconds: 12));
+    while (DateTime.now().isBefore(deadline)) {
+      final result = await pollGeneratorAccessRequest(
+        requestId: requestId,
+        pollToken: pollToken,
+      );
+      final status = result['status']?.toString() ?? 'error';
+      if (status == 'approved' ||
+          status == 'invalid_otp' ||
+          status == 'expired' ||
+          status == 'locked' ||
+          status == 'unauthorized' ||
+          status == 'error') {
+        return result;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+    }
+
+    return {
+      'status': 'error',
+      'message': 'لم تصل نتيجة التحقق من OTP.',
+    };
   } on Object {
-    // If storage is blocked, approval remains valid for the current session.
+    return {
+      'status': 'error',
+      'message': 'تعذر التحقق من كود OTP.',
+    };
   }
 }
 
-void clearGeneratorApproval() {
-  try {
-    html.window.localStorage.remove(_approvalUntilKey);
-  } on Object {
-    // Ignore unavailable browser storage.
-  }
+Future<Map<String, dynamic>> pollGeneratorAccessRequest({
+  required String requestId,
+  required String pollToken,
+}) {
+  return _serviceQuery({
+    'action': 'poll',
+    'id': requestId,
+    'token': pollToken,
+  });
 }
+
+// Deliberately disabled: a fresh password + OTP is required on reload.
+DateTime? readGeneratorApprovalExpiry() => null;
+void saveGeneratorApprovalExpiry(DateTime approvedUntil) {}
+void clearGeneratorApproval() {}
 
 Future<bool> sendGeneratorLoginEmail({
   required String username,
   required String accountEmail,
-}) async {
-  return false;
-}
+}) async => false;
