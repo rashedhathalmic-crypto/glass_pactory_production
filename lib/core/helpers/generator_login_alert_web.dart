@@ -13,6 +13,8 @@ const _approvalServiceUrl = String.fromEnvironment(
   defaultValue: _defaultApprovalServiceUrl,
 );
 const _otpLifetime = Duration(minutes: 10);
+const _serviceTimeout = Duration(minutes: 3);
+const _verificationTimeout = Duration(minutes: 3);
 
 Future<bool> requestGeneratorNotificationPermission() async {
   try {
@@ -124,7 +126,7 @@ Future<Map<String, dynamic>> _serviceQuery(
 
   body.children.add(script);
   try {
-    await loaded.future.timeout(const Duration(seconds: 12));
+    await loaded.future.timeout(_serviceTimeout);
     final raw = html.window.localStorage[storageKey];
     if (raw == null || raw.isEmpty) {
       return {
@@ -249,7 +251,7 @@ Future<Map<String, dynamic>> verifyGeneratorAccessOtp({
       'idToken': idToken,
     });
 
-    final deadline = DateTime.now().add(const Duration(seconds: 12));
+    final deadline = DateTime.now().add(_verificationTimeout);
     while (DateTime.now().isBefore(deadline)) {
       final result = await _serviceQuery({
         'action': 'poll',
@@ -268,7 +270,7 @@ Future<Map<String, dynamic>> verifyGeneratorAccessOtp({
       }
       await Future<void>.delayed(const Duration(milliseconds: 450));
     }
-    return {'status': 'error', 'message': 'لم تصل نتيجة التحقق من OTP.'};
+    return {'status': 'error', 'message': 'لم تصل نتيجة التحقق من OTP خلال 3 دقائق.'};
   } on Object {
     return {'status': 'error', 'message': 'تعذر التحقق من كود OTP.'};
   }
