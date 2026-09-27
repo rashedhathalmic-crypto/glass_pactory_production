@@ -1,0 +1,83 @@
+name: Build Offline USB
+on:
+  push:
+    branches: [offline-usb]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Vendor offline browser dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          npm pack pdfjs-dist@4.10.38
+          mkdir -p /tmp/pdfjs
+          tar -xzf pdfjs-dist-4.10.38.tgz -C /tmp/pdfjs
+          mkdir -p web/vendor/pdfjs
+          cp /tmp/pdfjs/package/build/pdf.min.mjs web/vendor/pdfjs/
+          cp /tmp/pdfjs/package/build/pdf.worker.min.mjs web/vendor/pdfjs/
+          npm pack tesseract.js@5
+          mkdir -p /tmp/tess
+          tar -xzf tesseract.js-*.tgz -C /tmp/tess
+          mkdir -p web/vendor/tesseract
+          cp /tmp/tess/package/dist/tesseract.min.js web/vendor/tesseract/
+          cp /tmp/tess/package/dist/worker.min.js web/vendor/tesseract/
+          npm pack tesseract.js-core@5
+          mkdir -p /tmp/tcore
+          tar -xzf tesseract.js-core-*.tgz -C /tmp/tcore
+          mkdir -p web/vendor/tesseract-core
+          cp -R /tmp/tcore/package/* web/vendor/tesseract-core/
+          mkdir -p web/vendor/tessdata
+          curl -fL --retry 3 -o web/vendor/tessdata/eng.traineddata.gz https://tessdata.projectnaptha.com/4.0.0/eng.traineddata.gz
+      - name: Build Flutter web
+        run: |
+          flutter pub get
+          flutter build web --release --base-href /
+      - name: Add portable Windows launcher
+        shell: bash
+        run: |
+          cat > build/web/START_OFFLINE.bat <<'BAT'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          where python >nul 2>nul
+          if %errorlevel%==0 (
+            start "" http://127.0.0.1:8765/
+            python -m http.server 8765 --bind 127.0.0.1
+            exit /b
+          )
+          where py >nul 2>nul
+          if %errorlevel%==0 (
+            start "" http://127.0.0.1:8765/
+            py -m http.server 8765 --bind 127.0.0.1
+            exit /b
+          )
+          echo Python is required for this launcher.
+          pause
+          BAT
+          cat > build/web/OFFLINE_README.txt <<'TXT'
+          Glass CNC Tools - Offline USB build
+          Run START_OFFLINE.bat, then use the local browser page.
+          All PDF.js, OCR worker/core, and English OCR data are packaged locally.
+          TXT
+      - name: Reject accidental network runtime references
+        shell: bash
+        run: |
+          if grep -R -nE "cdnjs|cdn.jsdelivr|tessdata.projectnaptha" build/web --exclude="*.map"; then
+            echo "External runtime dependency found"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Glass-CNC-Offline-USB
+          path: build/web
+          if-no-files-found: error
