@@ -8,7 +8,7 @@ function loadGeometryFeatureTesseract() {
   geometryFeatureTesseractLoader = new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src =
-      'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      './vendor/tesseract/tesseract.min.js';
     script.async = true;
     script.onload = () => resolve(window.Tesseract);
     script.onerror = () => reject(new Error('تعذر تحميل قارئ الزوايا والشنفر.'));
@@ -182,9 +182,9 @@ async function readGeometryFeatures(blob) {
   const Tesseract = await loadGeometryFeatureTesseract();
   const worker = await Tesseract.createWorker('eng', 1, {
     workerPath:
-      'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-    langPath: 'https://tessdata.projectnaptha.com/4.0.0',
-    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5',
+      './vendor/tesseract/worker.min.js',
+    langPath: './vendor/tessdata',
+    corePath: './vendor/tesseract-core',
   });
   try {
     await worker.setParameters({
