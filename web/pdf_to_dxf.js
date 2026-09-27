@@ -1,7 +1,7 @@
-import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs';
+import * as pdfjsLib from './vendor/pdfjs/pdf.min.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+  './vendor/pdfjs/pdf.worker.min.mjs';
 
 const apply = (m, x, y) => [
   m[0] * x + m[2] * y + m[4],
