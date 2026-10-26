@@ -9,6 +9,7 @@ import 'core/helpers/generator_login_alert.dart';
 import 'core/theme/app_theme.dart';
 import 'features/nc_generator/presentation/image_to_dxf_screen.dart';
 import 'features/nc_generator/presentation/nc_generator_screen.dart';
+import 'features/nc_generator/presentation/glass_cutting_screen.dart';
 import 'features/nc_generator/presentation/nc_simulator_screen.dart';
 import 'firebase_options.dart';
 
@@ -563,7 +564,7 @@ class _GeneratorHomeState extends State<_GeneratorHome> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Glass CNC Tools'),
@@ -587,6 +588,10 @@ class _GeneratorHomeState extends State<_GeneratorHome> {
                 text: 'DXF → NC Grinding',
               ),
               Tab(
+                icon: Icon(Icons.content_cut),
+                text: 'Cutting V2 DEV',
+              ),
+              Tab(
                 icon: Icon(Icons.description_outlined),
                 text: 'PDF / Image → Editable DXF',
               ),
@@ -604,6 +609,7 @@ class _GeneratorHomeState extends State<_GeneratorHome> {
                 _generatedProgram.value = program;
               },
             ),
+            const GlassCuttingScreen(),
             const ImageToDxfScreen(),
             NcSimulatorScreen(generatedProgram: _generatedProgram),
           ],
