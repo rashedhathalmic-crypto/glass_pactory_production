@@ -1,0 +1,32 @@
+name: Cutting V2 Windows verification
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - development/v2-cutting-offline
+    paths:
+      - 'lib/**'
+      - 'test/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/cutting-v2-windows.yml'
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Flutter dependencies
+        run: flutter pub get
+      - name: Unit tests
+        run: flutter test test/glass_cutting_planner_test.dart test/glass_edge_entry_planner_test.dart
+      - name: Enable Windows
+        run: flutter config --enable-windows-desktop
+      - name: Build offline Windows preview
+        run: flutter build windows --release -t lib/main_cutting_offline.dart
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cutting-v2-windows-offline-preview
+          path: build/windows/x64/runner/Release/**
+          if-no-files-found: error
